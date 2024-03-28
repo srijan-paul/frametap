@@ -1,0 +1,5 @@
+Compile:
+
+```
+ clang -fobjc-arc -framework AVFoundation -framework Foundation -framework CoreVideo -framework CoreMedia -framework CoreGraphics -framework ImageIO -framework CoreServices -framework AppKit -framework CoreImage -framework ScreenCaptureKit main.m -o hello && ./hello
+```
