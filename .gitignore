@@ -1,0 +1,8 @@
+zig-out
+zig-cache
+bin
+build
+*.out
+*.o
+
+notes.txt
