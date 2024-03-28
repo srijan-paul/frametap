@@ -1,0 +1,7 @@
+[submodule "vendor/lodepng"]
+	path = vendor/lodepng
+	url = https://github.com/lvandeve/lodepng
+[submodule "vendor/cgif"]
+	path = vendor/cgif
+	url = https://github.com/dloebl/cgif
+

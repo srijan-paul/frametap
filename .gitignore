@@ -1,0 +1,10 @@
+zig-out
+zig-cache
+bin
+build
+*.out
+*.o
+
+notes.txt
+./build.sh
+./znotes.txt

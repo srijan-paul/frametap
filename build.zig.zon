@@ -19,6 +19,11 @@
             .url = "https://github.com/mitchellh/zig-objc/archive/0a89cc09da6804ae448241a673ce85a282216074.tar.gz",
             .hash = "1220acfc53954f699415c6942422571670544a5236866fa7b6e069e2b1b2ba86ae9c",
         },
+
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.8.0.tar.gz",
+            .hash = "1220949d4e88864579067b6d4cdad6476c6176f27e782782c2c39b7f2c4817a10efb",
+        },
     },
     .paths = .{
         // This makes *all* files, recursively, included in this package. It is generally
