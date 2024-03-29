@@ -4,12 +4,63 @@
 
 void process_frame(
     uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row
-) {}
+) {
+  // Create a CGColorSpace
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
-int main() {
+  // Create a CGContext using the frame data
+  CGContextRef context = CGBitmapContextCreate(
+      base_addr, width, height, 8, bytes_per_row, colorSpace,
+      kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+  );
+
+  // Create a CGImage from the context
+  CGImageRef image = CGBitmapContextCreateImage(context);
+
+  // Prepare to write the image as a PNG to the filesystem
+  CFURLRef url = CFURLCreateWithFileSystemPath(
+      kCFAllocatorDefault,
+      CFSTR("image.png"), // Specify the file path here
+      kCFURLPOSIXPathStyle, false
+  );
+
+  // Create a CGImageDestinationRef for the URL
+  CGImageDestinationRef destination =
+      CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, NULL);
+
+  // Add the CGImage to the destination
+  CGImageDestinationAddImage(destination, image, NULL);
+
+  // Finalize the image destination to actually write the image
+  if (!CGImageDestinationFinalize(destination)) {
+    NSLog(@"Failed to write image to %@", url);
+  }
+}
+
+int mmain() {
   ScreenCapture sc;
   init_capture(&sc, process_frame);
   start_capture(&sc);
   stop_capture(&sc);
+  return 0;
+}
+
+int main(int argc, const char *argv[]) {
+  @autoreleasepool {
+    __block ScreenCapture sc;
+    init_capture(&sc, process_frame);
+    // Dispatch to a background queue
+    dispatch_async(
+        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+        ^{
+          start_capture_and_wait(&sc);
+        }
+    );
+
+    // Keep the main thread alive long enough to see our logs
+    [[NSRunLoop currentRunLoop]
+        runUntilDate:[NSDate dateWithTimeIntervalSinceNow:2]];
+    stop_capture(&sc);
+  }
   return 0;
 }

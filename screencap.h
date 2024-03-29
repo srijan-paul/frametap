@@ -11,5 +11,6 @@ typedef void (*ProcessFrameFn)(
 
 void init_capture(ScreenCapture *capture, ProcessFrameFn on_frame);
 bool start_capture(ScreenCapture *capture);
+bool start_capture_and_wait(ScreenCapture *capture);
 void stop_capture(ScreenCapture *capture);
 bool deinit_capture(ScreenCapture *capture);

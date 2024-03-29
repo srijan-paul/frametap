@@ -88,7 +88,6 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
 
   sc->conf = [[SCStreamConfiguration alloc] init];
   [sc->conf setPixelFormat:'BGRA'];
-  [sc->conf setQueueDepth:8];
   [sc->conf setCapturesAudio:NO];
   [sc->conf setShowsCursor:YES];
   [sc->conf setWidth:100];
@@ -216,11 +215,21 @@ bool start_capture(ScreenCapture *sc) {
     return false;
   }
 
-  dispatch_semaphore_wait(sc->capture_done, DISPATCH_TIME_FOREVER);
   return ok;
 }
 
+bool start_capture_and_wait(ScreenCapture *capture) {
+  if (!start_capture(capture)) {
+    return false;
+  }
+
+  dispatch_semaphore_wait(capture->capture_done, DISPATCH_TIME_FOREVER);
+  return true;
+}
+
 void stop_capture(ScreenCapture *sc) {
+  dispatch_semaphore_signal(sc->capture_done);
+
   dispatch_semaphore_t finished = dispatch_semaphore_create(0);
   [sc->stream stopCaptureWithCompletionHandler:^(NSError *_Nullable error) {
     if (error != nil) {
