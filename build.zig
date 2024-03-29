@@ -36,11 +36,33 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("objc");
     exe.linkFramework("Foundation");
     exe.linkFramework("AppKit");
+    exe.linkFramework("ScreenCaptureKit");
+    exe.linkFramework("CoreVideo");
+    exe.linkFramework("CoreMedia");
+
+    exe.addIncludePath(std.Build.LazyPath.relative("native"));
+    exe.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+
+    const giflib_objects = [_][:0]const u8{
+        "vendor/giflib/lib/egif_lib.o",
+        "vendor/giflib/lib/dgif_lib.o",
+        "vendor/giflib/lib/gifalloc.o",
+        "vendor/giflib/lib/gif_err.o",
+        "vendor/giflib/lib/gif_hash.o",
+        "vendor/giflib/lib/quantize.o",
+        "vendor/giflib/lib/openbsd-reallocarray.o",
+    };
+
+    exe.addIncludePath(std.Build.LazyPath.relative("vendor/giflib/lib"));
+    for (giflib_objects) |objpath| {
+        exe.addObjectFile(std.Build.LazyPath.relative(objpath));
+    }
 
     lib.root_module.addImport("objc", objc.module("objc"));
     lib.linkSystemLibrary("objc");
     lib.linkFramework("Foundation");
     lib.linkFramework("AppKit");
+    lib.addIncludePath(std.Build.LazyPath.relative("native"));
 
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the executable");

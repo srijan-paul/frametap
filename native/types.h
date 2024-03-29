@@ -4,7 +4,7 @@
 @interface OutputProcessor : NSObject <SCStreamOutput>
 
 @property ScreenCapture *sc;
-@property ProcessFrameFn processFrameFn;
+@property FrameProcessor frame_processor;
 
 @end
 
@@ -23,5 +23,5 @@ struct ScreenCapture {
 
   dispatch_semaphore_t capture_done;
   bool should_stop_capture;
-  ProcessFrameFn processFrameFn;
+  FrameProcessor frame_processor;
 };

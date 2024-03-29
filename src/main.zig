@@ -1,9 +1,87 @@
 pub const core = @import("core.zig");
+const screencap = @cImport(@cInclude("screencap.h"));
 const mac = @import("mac-os.zig");
-
 const std = @import("std");
+const giflib = @import("./giflib.zig");
+
+const Thread = std.Thread;
+
+pub const GifContext = struct {
+    const Self = @This();
+    allocator: std.mem.Allocator,
+    frames: std.ArrayList([]u8),
+    width: usize,
+    height: usize,
+    count: usize = 0,
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return GifContext{
+            .allocator = allocator,
+            .frames = std.ArrayList([]u8).init(allocator),
+            .width = 0,
+            .height = 0,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.frames.items) |frame| {
+            self.allocator.free(frame);
+        }
+        self.frames.deinit();
+    }
+};
+
+export fn process_frame(
+    frame: [*c]u8,
+    w: usize,
+    h: usize,
+    bytes_per_row: usize,
+    otherdata: ?*anyopaque,
+) void {
+    const ptr = if (otherdata) |ptr| ptr else return std.debug.panic("failed cast", .{});
+    const gif_ctx: *GifContext = @alignCast(@ptrCast(ptr));
+
+    gif_ctx.width = w;
+    gif_ctx.height = h;
+
+    const len = bytes_per_row * h;
+    const buf = gif_ctx.allocator.alloc(u8, len) catch std.debug.panic("WTF", .{});
+
+    for (0..len) |i| {
+        buf[i] = frame[i];
+    }
+
+    gif_ctx.frames.append(buf) catch std.debug.panic("WTF", .{});
+}
+
+fn start_capturing(sc: *screencap.ScreenCapture) void {
+    _ = screencap.start_capture_and_wait(sc);
+}
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var ctx = GifContext.init(allocator);
+    defer ctx.deinit();
+
+    var frame_processor: screencap.FrameProcessor = undefined;
+    frame_processor.other_data = &ctx;
+    frame_processor.process_fn = process_frame;
+
+    const sc = screencap.alloc_capture().?;
+    screencap.init_capture(sc, frame_processor);
+
+    const thread = try std.Thread.spawn(.{}, start_capturing, .{sc});
+    std.time.sleep(std.time.ns_per_s * 2);
+
+    screencap.stop_capture(sc);
+    thread.join();
+
+    std.debug.print("captured {d} frames\n", .{ctx.frames.items.len});
+}
+
+pub fn main2() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 

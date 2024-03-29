@@ -1,13 +1,14 @@
 #import "screencap.h"
 #import "types.h"
+#include <CoreMedia/CoreMedia.h>
 
 @implementation OutputProcessor
 
 - (instancetype)init:(struct ScreenCapture *)sc
-     onFrameReceived:(ProcessFrameFn)processFn {
+     onFrameReceived:(FrameProcessor)processFn {
   self = [super init];
   self.sc = sc;
-  self.processFrameFn = processFn;
+  self.frame_processor = processFn;
   return self;
 }
 
@@ -40,15 +41,22 @@
   size_t const width = CVPixelBufferGetWidth(pixelBuffer);
   size_t const height = CVPixelBufferGetHeight(pixelBuffer);
 
-  self.processFrameFn(baseAddress, width, height, bytesPerRow);
+  self.frame_processor.process_fn(
+      baseAddress, width, height, bytesPerRow, self.frame_processor.other_data
+  );
 
   // Unlock the pixel buffer
   CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
 }
 @end
 
-void init_capture(ScreenCapture *sc, ProcessFrameFn onFrameReceived) {
-  sc->processFrameFn = onFrameReceived;
+ScreenCapture *alloc_capture() {
+  ScreenCapture *sc = malloc(sizeof(ScreenCapture));
+  return sc;
+}
+
+void init_capture(ScreenCapture *sc, FrameProcessor frame_processor) {
+  sc->frame_processor = frame_processor;
   sc->should_stop_capture = false;
   sc->displayID = CGMainDisplayID();
   sc->display = nil;
@@ -90,13 +98,14 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   [sc->conf setPixelFormat:'BGRA'];
   [sc->conf setCapturesAudio:NO];
   [sc->conf setShowsCursor:YES];
+  [sc->conf setMinimumFrameInterval:kCMTimeZero];
 
   sc->stream = [[SCStream alloc] initWithFilter:sc->filter
                                   configuration:sc->conf
                                        delegate:nil];
 
   sc->processor = [[OutputProcessor alloc] init:sc
-                                onFrameReceived:sc->processFrameFn];
+                                onFrameReceived:sc->frame_processor];
   NSError *err;
   bool ok = [sc->stream addStreamOutput:sc->processor
                                    type:SCStreamOutputTypeScreen

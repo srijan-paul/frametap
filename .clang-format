@@ -1,4 +1,5 @@
 BasedOnStyle: LLVM
+IndentWidth: 2 
 AlignAfterOpenBracket: BlockIndent
 BinPackParameters: true
 ColumnLimit: 80

@@ -3,8 +3,11 @@
 #include <Foundation/Foundation.h>
 
 void process_frame(
-    uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row
+    uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row,
+    void *_
 ) {
+  if (true)
+    return;
 
   NSLog(@"Processing frame of size %zux%zu", width, height);
   // Create a CGColorSpace
@@ -41,8 +44,10 @@ void process_frame(
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    __block FrameProcessor processor;
+    processor.process_fn = process_frame;
     __block ScreenCapture sc;
-    init_capture(&sc, process_frame);
+    init_capture(&sc, processor);
     // Dispatch to a background queue
     dispatch_async(
         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),

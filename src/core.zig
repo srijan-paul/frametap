@@ -49,4 +49,7 @@ pub const JifError = error{
     NSBitmapImageRepClassNotFound,
     NSDictionaryClassNotFound,
     ImageCreationFailed,
+    GifQuantizeFailed,
+    GifConvertFailed,
+    GifWriteLineFailed,
 };
