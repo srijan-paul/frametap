@@ -6,3 +6,5 @@ build
 *.o
 
 notes.txt
+./build.sh
+./znotes.txt
