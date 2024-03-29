@@ -90,8 +90,6 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   [sc->conf setPixelFormat:'BGRA'];
   [sc->conf setCapturesAudio:NO];
   [sc->conf setShowsCursor:YES];
-  [sc->conf setWidth:100];
-  [sc->conf setHeight:100];
 
   sc->stream = [[SCStream alloc] initWithFilter:sc->filter
                                   configuration:sc->conf
@@ -138,46 +136,6 @@ static bool start_screen_capture(ScreenCapture *sc) {
 typedef void (^ShareableContentCompletionHandler)(
     SCShareableContent *content, NSError *error
 );
-
-void captureScreenWith() {
-  dispatch_semaphore_t content_received = dispatch_semaphore_create(0);
-
-  __block SCShareableContent *content;
-  ShareableContentCompletionHandler handler =
-      ^(SCShareableContent *shareableContent, NSError *err) {
-        if (err != nil) {
-          NSLog(
-              @"Error retrieving shareable content: %@",
-              err.localizedDescription
-          );
-          exit(1);
-        }
-
-        content = shareableContent;
-        dispatch_semaphore_signal(content_received);
-      };
-
-  [SCShareableContent getShareableContentExcludingDesktopWindows:YES
-                                             onScreenWindowsOnly:YES
-                                               completionHandler:handler];
-
-  dispatch_semaphore_wait(content_received, DISPATCH_TIME_FOREVER);
-
-  ScreenCapture sc;
-  if (!setup_screen_capture(&sc, content)) {
-    NSLog(
-        @"Error initializing screen capture: %@", sc.error.localizedDescription
-    );
-    exit(1);
-  }
-
-  if (!start_screen_capture(&sc)) {
-    NSLog(@"Error starting screen capture: %@", sc.error.localizedDescription);
-    exit(1);
-  }
-
-  dispatch_semaphore_wait(sc.capture_done, DISPATCH_TIME_FOREVER);
-}
 
 bool start_capture(ScreenCapture *sc) {
   dispatch_semaphore_t sharable_content_available =
@@ -241,5 +199,5 @@ void stop_capture(ScreenCapture *sc) {
   dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
 }
 
-// not much to do on MacOS with ARC :)
+// not much to do on MacOS with ARC enabled :)
 bool deinit_capture(ScreenCapture *sc) { return true; }

@@ -5,44 +5,38 @@
 void process_frame(
     uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row
 ) {
+
+  NSLog(@"Processing frame of size %zux%zu", width, height);
   // Create a CGColorSpace
   CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
   // Create a CGContext using the frame data
   CGContextRef context = CGBitmapContextCreate(
       base_addr, width, height, 8, bytes_per_row, colorSpace,
-      kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host
   );
 
   // Create a CGImage from the context
   CGImageRef image = CGBitmapContextCreateImage(context);
 
-  // Prepare to write the image as a PNG to the filesystem
+  // Create a destination to write the TIFF image to the filesystem
   CFURLRef url = CFURLCreateWithFileSystemPath(
       kCFAllocatorDefault,
-      CFSTR("image.png"), // Specify the file path here
+      CFSTR("frame.tiff"), // Specify the file path here
       kCFURLPOSIXPathStyle, false
   );
-
-  // Create a CGImageDestinationRef for the URL
   CGImageDestinationRef destination =
-      CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, NULL);
+      CGImageDestinationCreateWithURL(url, kUTTypeTIFF, 1, NULL);
 
-  // Add the CGImage to the destination
+  // Add the image to the destination
   CGImageDestinationAddImage(destination, image, NULL);
 
-  // Finalize the image destination to actually write the image
+  // Finalize the destination to write the image to disk
   if (!CGImageDestinationFinalize(destination)) {
-    NSLog(@"Failed to write image to %@", url);
+    NSLog(@"Failed to write image as TIFF");
   }
-}
 
-int mmain() {
-  ScreenCapture sc;
-  init_capture(&sc, process_frame);
-  start_capture(&sc);
-  stop_capture(&sc);
-  return 0;
+  exit(0);
 }
 
 int main(int argc, const char *argv[]) {
