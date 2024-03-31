@@ -6,6 +6,7 @@ const cgif = @cImport(@cInclude("cgif.h"));
 const JifError = @import("./core.zig").JifError;
 const quant = @import("./quantize.zig");
 
+/// Intialize a cgif gif config struct.
 fn initGifConfig(
     gif_config: *cgif.CGIF_Config,
     path: [:0]const u8,
@@ -26,6 +27,7 @@ fn initGifConfig(
     gif_config.height = @intCast(height);
 }
 
+/// Intialize a cgif frame config struct.
 fn initFrameConfig(conf: *cgif.CGIF_FrameConfig, delay: u16) void {
     conf.pLocalPalette = null;
     conf.pImageData = null;
@@ -38,56 +40,7 @@ fn initFrameConfig(conf: *cgif.CGIF_FrameConfig, delay: u16) void {
     conf.delay = delay;
 }
 
-pub fn example() !void {
-    const allocator = std.heap.page_allocator;
-    const width = 100;
-    const height = 100;
-    const path = "test.gif";
-    var palette = [_]u8{
-        0xFF, 0x00, 0x00, // red
-        0x00, 0xFF, 0x00, // green
-        0x00, 0x00, 0xFF, // blue
-    };
-
-    const numColors: c_ushort = 3;
-
-    var gif_config: cgif.CGIF_Config = undefined;
-    initGifConfig(&gif_config, path, width, height);
-    gif_config.pGlobalPalette = &palette;
-    gif_config.numGlobalPaletteEntries = numColors;
-
-    var frame_config: cgif.CGIF_FrameConfig = undefined;
-    initFrameConfig(&frame_config, 10);
-
-    var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
-        std.debug.panic("failed", .{});
-    };
-    gif = gif;
-
-    const n_pixels = width * height;
-    const image_data = try allocator.alloc(u8, n_pixels);
-    defer allocator.free(image_data);
-
-    for (0..n_pixels) |i| {
-        image_data[i] = @truncate((i % width) / 4 % numColors);
-    }
-
-    std.debug.print("{}\n", .{gif_config.pGlobalPalette[image_data[0]]});
-
-    frame_config.pImageData = image_data.ptr;
-    // std.debug.print("image_data: {any}\n", .{image_data});
-
-    var res = cgif.cgif_addframe(gif, &frame_config);
-    if (res != 0) {
-        std.debug.panic("{}", .{res});
-    }
-
-    res = cgif.cgif_close(gif);
-    if (res != 0) {
-        std.debug.panic("{}", .{res});
-    }
-}
-
+/// convert a sequence of BGRA frames to a gif file.
 pub fn bgraFrames2Gif(
     allocator: std.mem.Allocator,
     frames: []const []const u8,
@@ -135,18 +88,13 @@ pub fn bgraFrames2Gif(
         frame_config.pLocalPalette = quantized.color_table.ptr;
         frame_config.numLocalPaletteEntries = @intCast(quantized.color_table.len / 3);
 
-        const result = cgif.cgif_addframe(gif, &frame_config);
-
-        if (result != 0) {
-            std.debug.panic("{}", .{result});
+        if (cgif.cgif_addframe(gif, &frame_config) != 0) {
             return JifError.GifConvertFailed;
         }
         // std.debug.print("added frame\n", .{});
     }
 
-    const result = cgif.cgif_close(gif);
-    if (result != 0) {
-        std.debug.panic("{}", .{result});
-        return JifError.GifConvertFailed;
+    if (cgif.cgif_close(gif) != 0) {
+        return JifError.GifFlushFailed;
     }
 }

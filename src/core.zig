@@ -51,4 +51,6 @@ pub const JifError = error{
     ImageCreationFailed,
     PNGConvertFailed,
     GifConvertFailed,
+    /// Failed to write to the GIF file.
+    GifFlushFailed,
 };

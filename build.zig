@@ -47,7 +47,6 @@ pub fn build(b: *std.Build) void {
     exe.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
 
     exe.linkLibC();
-    exe.linkSystemLibrary("z");
 
     exe.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
     exe.addCSourceFile(.{

@@ -27,7 +27,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     for (0..256) |i| {
         color_table[i] = 200;
         color_table[i + 1] = 200;
-        color_table[i + 2] = 128;
+        color_table[i + 2] = 100;
     }
 
     for (0..image_buffer.len) |i| {

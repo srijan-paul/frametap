@@ -1,6 +1,3 @@
-[submodule "vendor/libpng"]
-	path = vendor/libpng
-	url = https://github.com/pnggroup/libpng
 [submodule "vendor/lodepng"]
 	path = vendor/lodepng
 	url = https://github.com/lvandeve/lodepng
