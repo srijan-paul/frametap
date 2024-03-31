@@ -4,8 +4,11 @@
 
 void process_frame(
     uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row,
-    void *_
+    void *i
 ) {
+
+  *((int *)i) = *(int *)i + 1;
+
   if (true)
     return;
 
@@ -46,6 +49,8 @@ int main(int argc, const char *argv[]) {
   @autoreleasepool {
     __block FrameProcessor processor;
     processor.process_fn = process_frame;
+    int count = 0;
+    processor.other_data = &count;
     __block ScreenCapture sc;
     init_capture(&sc, processor);
     // Dispatch to a background queue
@@ -60,6 +65,7 @@ int main(int argc, const char *argv[]) {
     [[NSRunLoop currentRunLoop]
         runUntilDate:[NSDate dateWithTimeIntervalSinceNow:2]];
     stop_capture(&sc);
+    NSLog(@"Captured %d frames", count);
   }
   return 0;
 }

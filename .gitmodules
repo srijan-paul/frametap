@@ -1,3 +1,9 @@
-[submodule "vendor/giflib"]
-	path = vendor/giflib
-	url = https://github.com/mirrorer/giflib
+[submodule "vendor/libpng"]
+	path = vendor/libpng
+	url = https://github.com/pnggroup/libpng
+[submodule "vendor/lodepng"]
+	path = vendor/lodepng
+	url = https://github.com/lvandeve/lodepng
+[submodule "vendor/cgif"]
+	path = vendor/cgif
+	url = https://github.com/dloebl/cgif

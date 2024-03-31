@@ -2,7 +2,8 @@ pub const core = @import("core.zig");
 const screencap = @cImport(@cInclude("screencap.h"));
 const mac = @import("mac-os.zig");
 const std = @import("std");
-const giflib = @import("./giflib.zig");
+const png = @import("libpng.zig");
+const gif = @import("gif.zig");
 
 const Thread = std.Thread;
 
@@ -47,9 +48,7 @@ export fn process_frame(
     const len = bytes_per_row * h;
     const buf = gif_ctx.allocator.alloc(u8, len) catch std.debug.panic("WTF", .{});
 
-    for (0..len) |i| {
-        buf[i] = frame[i];
-    }
+    @memcpy(buf, @as([*]u8, frame));
 
     gif_ctx.frames.append(buf) catch std.debug.panic("WTF", .{});
 }
@@ -78,7 +77,18 @@ pub fn main() !void {
     screencap.stop_capture(sc);
     thread.join();
 
-    std.debug.print("captured {d} frames\n", .{ctx.frames.items.len});
+    // for (0.., ctx.frames.items) |i, frame| {
+    //     const filename = try std.fmt.allocPrint(allocator, "frames/frame-{}.bin", .{i});
+    //     const file = try std.fs.cwd().createFile(filename, .{ .read = true });
+    //     try file.writeAll(frame);
+    // }
+    try gif.bgraFrames2Gif(
+        allocator,
+        ctx.frames.items,
+        @intCast(ctx.width),
+        @intCast(ctx.height),
+        "out.gif",
+    );
 }
 
 pub fn main2() !void {

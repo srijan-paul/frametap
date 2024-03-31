@@ -1,6 +1,5 @@
 zig-out
 zig-cache
-vendor
 bin
 build
 *.out

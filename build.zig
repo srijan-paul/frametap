@@ -43,20 +43,19 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(std.Build.LazyPath.relative("native"));
     exe.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
 
-    const giflib_objects = [_][:0]const u8{
-        "vendor/giflib/lib/egif_lib.o",
-        "vendor/giflib/lib/dgif_lib.o",
-        "vendor/giflib/lib/gifalloc.o",
-        "vendor/giflib/lib/gif_err.o",
-        "vendor/giflib/lib/gif_hash.o",
-        "vendor/giflib/lib/quantize.o",
-        "vendor/giflib/lib/openbsd-reallocarray.o",
-    };
+    exe.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
 
-    exe.addIncludePath(std.Build.LazyPath.relative("vendor/giflib/lib"));
-    for (giflib_objects) |objpath| {
-        exe.addObjectFile(std.Build.LazyPath.relative(objpath));
-    }
+    exe.linkLibC();
+    exe.linkSystemLibrary("z");
+
+    exe.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
+    exe.addCSourceFile(.{
+        .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c"),
+    });
+    exe.addCSourceFile(.{
+        .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c"),
+    });
 
     lib.root_module.addImport("objc", objc.module("objc"));
     lib.linkSystemLibrary("objc");
