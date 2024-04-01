@@ -361,7 +361,6 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         std.debug.assert(new_partition.num_pixels == countPixels(new_partition, new_partition.num_colors));
 
         // Update the bounding box of the current partition.
-
     }
 }
 
