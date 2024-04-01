@@ -1,15 +1,15 @@
 # Jif
 
-> jif is a work in progress, and does not support all platforms just yet. Expect more in the days to come.
+> Jif is *very* early in development. Definitely do not use it just yet. 
 
 A cross platform screen capture library focused on performance, control, and image quality. 
 
 ## Why?
 
-I want an app that'll let me capture my screen and control the compression, quantization, dithering, etc. of the resulting image/video content.
+I wanted a screen capture app that lets me control the compression, quantization, dithering, etc.
 Surprisingly, there's nothing that can do all that on all three major OSes (well, except for FFMPEG – but that's a command line tool).
 
-Hopefully, once the library is mature is mature enough, I'll be able to use it to build one that just works.
+Hopefully, once the library is mature is mature enough, I'll be able to use it to build such an app.
 While I'm still figuring thngs out, you can try [LICECap](https://www.cockos.com/licecap/) — it's pretty solid!
 
 ## Goals
