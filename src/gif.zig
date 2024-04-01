@@ -79,6 +79,7 @@ pub fn bgraFrames2Gif(
             rgb_buf[dst_base + 1] = g;
             rgb_buf[dst_base + 2] = b;
         }
+        // std.process.exit(0);
 
         // quantize the RGB buffer
         const quantized = try quant.quantize(allocator, rgb_buf);
@@ -91,7 +92,7 @@ pub fn bgraFrames2Gif(
         if (cgif.cgif_addframe(gif, &frame_config) != 0) {
             return JifError.GifConvertFailed;
         }
-        // std.debug.print("added frame\n", .{});
+        break;
     }
 
     if (cgif.cgif_close(gif) != 0) {
