@@ -2,7 +2,7 @@ pub const core = @import("core.zig");
 const screencap = @cImport(@cInclude("screencap.h"));
 const mac = @import("mac-os.zig");
 const std = @import("std");
-const png = @import("libpng.zig");
+const png = @import("png.zig");
 const gif = @import("gif.zig");
 
 const Thread = std.Thread;

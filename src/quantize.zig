@@ -26,7 +26,7 @@ pub const QuantizeResult = struct {
 // The color array maps a color index to a "Color" object that contains:
 // 1. The RGB value of the color and its frequency in the original image.
 // We use 5 bits per color channel, so we can represent 32 levels of each color.
-const color_array_size = (2 ** 5) ** 3; // 32768
+const color_array_size = 32768; // (2 ^ 5) ^ 3
 
 const QuantizedColor = struct {
     /// RGB color value.
@@ -57,29 +57,6 @@ const ColorSpace = struct {
     num_colors: usize,
     /// Number of pixels that this partition accounts for.
     num_pixels: usize,
-
-    /// Find the average of all the colors in this partition.
-    fn averageColor(self: *const Self) [3]u8 {
-        var rgb = [3]u32{ 0, 0, 0 };
-        var color = self.colors;
-        std.debug.assert(color != null);
-        for (0..self.num_colors) |_| {
-            if (color.next) |c| {
-                color = c;
-                for (0..3) |j| {
-                    rgb[j] += color.RGB[j] * color.frequency;
-                }
-            } else {
-                break;
-            }
-        }
-
-        for (0..3) |i| {
-            rgb[i] /= self.num_pixels;
-        }
-
-        return rgb;
-    }
 };
 
 const Channel = enum(u5) { Red = 0, Blue = 1, Green = 2 };
@@ -129,7 +106,7 @@ test "sorting pixels by color channel" {
 }
 
 const bits_per_prim_color = 5; // 5 bits per color channel.
-const max_prim_color = (2 ** bits_per_prim_color) - 1; // 0x1f
+const max_prim_color = 0b11111;
 const shift = 8 - bits_per_prim_color;
 
 const RGB5 = struct {
@@ -153,9 +130,9 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
         color.new_index = 0;
         // The RGB values are packed in the lower 15 bits of its index
         // 0x--(RRRRR)(GGGGG)(BBBBB)
-        color.RGB[0] = i >> (2 * bits_per_prim_color); // R: upper 5 bits
-        color.RGB[1] = (i >> bits_per_prim_color) & max_prim_color; // G: middle 5 bits
-        color.RGB[2] = i & max_prim_color; // B: lower 5 bits.
+        color.RGB[0] = @truncate(i >> (2 * bits_per_prim_color)); // R: upper 5 bits
+        color.RGB[1] = @truncate((i >> bits_per_prim_color) & max_prim_color); // G: middle 5 bits
+        color.RGB[2] = @truncate(i & max_prim_color); // B: lower 5 bits.
     }
 
     // Sample all colors in the image, and count their frequency.
@@ -172,9 +149,6 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
 
         const index = r_mask | g_mask | b_mask;
         all_colors[index].frequency += 1;
-        all_colors[index].RGB[0] = r;
-        all_colors[index].RGB[1] = g;
-        all_colors[index].RGB[2] = b;
     }
 
     // Find all colors in the color table that are used at least once, and chain them.
@@ -204,11 +178,10 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     first_partition.num_colors = color_count;
     first_partition.num_pixels = n_pixels;
 
-    findWidestChannel(&first_partition);
+    findWidestChannel(first_partition);
 
     const partitions = try medianCut(
         allocator,
-        all_colors,
         first_partition,
         3,
     );
@@ -222,22 +195,30 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
 
     const color_table = try allocator.alloc(u8, partitions.len * 3);
     for (0.., partitions) |i, partition| {
-        // 1. find the average color of this partition.
-        const avg_color = partition.averageColor();
-        color_table[i * 3] = avg_color;
-        color_table[i * 3 + 1] = avg_color[1];
-        color_table[i * 3 + 2] = avg_color[2];
+        if (partition.num_colors == 0) continue;
 
+        // This loop does two things:
+        // 1. Find the average color of this partition.
         // 2. Point all colors in this partition to the index of this partition.
         var color = partition.colors;
+        var rgb_sum: [3]usize = .{ 0, 0, 0 };
         for (0..partition.num_colors) |_| {
-            color.new_index = i;
+            color.new_index = @truncate(i);
+
+            rgb_sum[0] += color.RGB[0];
+            rgb_sum[1] += color.RGB[1];
+            rgb_sum[2] += color.RGB[2];
+
             if (color.next) |next| {
                 color = next;
             } else {
                 unreachable;
             }
         }
+
+        color_table[i * 3] = @intCast((rgb_sum[0] << shift) / partition.num_colors);
+        color_table[i * 3 + 1] = @intCast((rgb_sum[1] << shift) / partition.num_colors);
+        color_table[i * 3 + 2] = @intCast((rgb_sum[2] << shift) / partition.num_colors);
     }
 
     // Now go over the input image, and replace each pixel with the index of the partition
@@ -329,13 +310,17 @@ test "findWidestChannel" {
 /// then sort that array along the widest channel of the partition, and return it.
 /// The array contains pointers to the original colors in the partition.
 /// The array is owned by the caller, and must be kept alive at least as long as the partition itself.
-fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]QuantizedColor {
+fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]*QuantizedColor {
     var sorted_colors = try allocator.alloc(*QuantizedColor, partition.num_colors);
     var color = partition.colors;
     for (0..partition.num_colors) |i| {
-        std.debug.assert(color != null);
+        std.debug.assert(@as(?*QuantizedColor, color) != null);
         sorted_colors[i] = color;
-        color = color.next;
+        if (color.next) |next| {
+            color = next;
+        } else {
+            unreachable;
+        }
     }
 
     std.sort.heap(
@@ -354,9 +339,9 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
 
 /// Given a list of partitions,
 /// find the partition that varies the most in RGB width, and return its index.
-fn findPartitionToSplit(partitions: []ColorSpace) ?usize {
-    var max_size = 0;
-    var split_index = 0;
+fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
+    var max_size: usize = 0;
+    var split_index: usize = 0;
     var found = false;
     for (0..partitions.len) |i| {
         const partition = partitions[i];
@@ -370,14 +355,14 @@ fn findPartitionToSplit(partitions: []ColorSpace) ?usize {
     return split_index;
 }
 
-/// Recursively split the colorspace into smaller partitions until 2**depth partitions are created.
+/// Recursively split the colorspace into smaller partitions until 2^depth partitions are created.
 fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: u3) ![]*ColorSpace {
-    const total_partitions = 2 ** depth;
+    const total_partitions = std.math.pow(usize, 2, depth);
 
     var parts = try allocator.alloc(*ColorSpace, total_partitions);
     parts[0] = first_partition;
 
-    var n_partitions = 1; // we're starting with 1 large partition.
+    var n_partitions: usize = 1; // we're starting with 1 large partition.
     while (n_partitions < total_partitions) : (n_partitions += 1) {
         // Look for the partition that has the largest variance in RGB width.
         const split_index_ = findPartitionToSplit(parts[0..n_partitions]);
@@ -404,8 +389,8 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // # of pixels that should remain in the current partition (left half).
         // The first color in the current partition will remain in it.
         const target_pixel_count = partition_to_split.num_pixels / 2;
-        var remaining_pixel_count = color.frequency; // # of pixels that will remain in the current partition.
-        var remaining_color_count = 1; // # of colors that will remain in the current partition.
+        var remaining_pixel_count: usize = color.frequency; // # of pixels that will remain in the current partition.
+        var remaining_color_count: usize = 1; // # of colors that will remain in the current partition.
 
         // At the end of this loop, `color` will point to the last color that will remain
         // in the current partition, and `color.next` will be the first color in the new partition.
@@ -456,12 +441,16 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
 
 /// Returns the sum of frequencies of all colors in the partition.
 fn countPixels(partition: *ColorSpace, ncolors: usize) usize {
-    var count = 0;
+    var count: usize = 0;
     var color = partition.colors;
     for (0..ncolors) |_| {
-        std.debug.assert(color != null);
+        std.debug.assert(@as(?*QuantizedColor, color) != null);
         count += color.frequency;
-        color = color.next;
+        if (color.next) |next| {
+            color = next;
+        } else {
+            break;
+        }
     }
     return count;
 }
