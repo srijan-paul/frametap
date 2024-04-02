@@ -84,7 +84,7 @@ pub fn bgraFrames2Gif(
         }
 
         // quantize the RGB buffer
-        const quantized = try quant.quantizeGiflib(allocator, rgb_buf);
+        const quantized = try quant.quantize(allocator, rgb_buf);
         defer quantized.deinit(allocator);
 
         frame_config.pImageData = quantized.image_buffer.ptr;

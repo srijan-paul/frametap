@@ -72,7 +72,7 @@ pub fn main() !void {
     screencap.init_capture(sc, frame_processor);
 
     const thread = try std.Thread.spawn(.{}, start_capturing, .{sc});
-    std.time.sleep(std.time.ns_per_s * 2);
+    std.time.sleep(std.time.ns_per_s * 4);
 
     screencap.stop_capture(sc);
     thread.join();

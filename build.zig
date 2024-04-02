@@ -49,6 +49,17 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
 
     exe.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
+    exe.addIncludePath(std.Build.LazyPath.relative("vendor/giflib/lib"));
+
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/dgif_lib.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/egif_lib.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_err.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_font.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_hash.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gifalloc.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/quantize.o"));
+    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/openbsd-reallocarray.o"));
+
     exe.addCSourceFile(.{
         .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c"),
     });

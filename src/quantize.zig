@@ -64,17 +64,8 @@ const Channel = enum(u5) { Red = 0, Blue = 1, Green = 2 };
 
 /// A function that compares two pixels based on a color channel.
 fn colorLessThan(channel: Channel, a: *QuantizedColor, b: *QuantizedColor) bool {
-    const sortaxis: usize = @intFromEnum(channel);
-
-    const a_color = @as(usize, a.RGB[sortaxis]) * 256 * 256 +
-        @as(usize, a.RGB[(sortaxis + 1) % 3]) * 256 +
-        @as(usize, a.RGB[(sortaxis + 2) % 3]);
-
-    const b_color = @as(usize, b.RGB[sortaxis]) * 256 * 256 +
-        @as(usize, b.RGB[(sortaxis + 1) % 3]) * 256 +
-        @as(usize, b.RGB[(sortaxis + 2) % 3]);
-
-    return a_color < b_color;
+    const sort_channel: usize = @intFromEnum(channel);
+    return a.RGB[sort_channel] < b.RGB[sort_channel];
 }
 
 test "pixel comparison function" {
@@ -222,6 +213,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
                 color = next;
             } else {
                 std.debug.assert(j == partition.num_colors - 1);
+                break;
             }
         }
 
@@ -376,6 +368,7 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
             color = next;
         } else {
             std.debug.assert(i == partition.num_colors - 1);
+            break;
         }
     }
 
@@ -401,7 +394,7 @@ fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
     var found = false;
     for (0..partitions.len) |i| {
         const partition = partitions[i];
-        if (max_size < partition.rgb_width and partition.num_colors > 1) {
+        if (partition.rgb_width > max_size and partition.num_colors > 1) {
             max_size = partition.rgb_width;
             split_index = i;
             found = true;
@@ -491,11 +484,14 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // Add the new partition to the partitions array.
         parts[n_partitions] = new_partition;
 
-        // std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
+        //  std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
         // std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
     }
 
-    std.debug.assert(n_partitions == total_partitions);
+    if (n_partitions != total_partitions) {
+        return try allocator.realloc(parts, n_partitions);
+    }
+
     return parts;
 }
 

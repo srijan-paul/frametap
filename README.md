@@ -1,8 +1,13 @@
-# Jif
+# Frametrap 
 
-> Jif is *very* early in development. Definitely do not use it just yet. 
+> frametrap is *very* early in development. Definitely do not use it just yet. 
 
-A cross platform screen capture library focused on performance, control, and image quality. 
+A cross platform screen capture library for MacOS, Windows, and Linux.
+
+Frametrap can:
+  - Deliver live frame information from your screen.
+  - Capture GIFs.
+  - Export frames as PNGs.
 
 ## Why?
 
