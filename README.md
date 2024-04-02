@@ -1,10 +1,10 @@
-# Frametrap 
+# Frametap 
 
-> frametrap is *very* early in development. Definitely do not use it just yet. 
+> frametap is *very* early in development. Definitely do not use it just yet. 
 
 A cross platform screen capture library for MacOS, Windows, and Linux.
 
-Frametrap can:
+Frametap can:
   - Deliver live frame information from your screen.
   - Capture GIFs.
   - Export frames as PNGs.
