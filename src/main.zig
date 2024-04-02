@@ -85,6 +85,7 @@ pub fn main() !void {
     try gif.bgraFrames2Gif(
         allocator,
         ctx.frames.items,
+        std.time.ms_per_s * 2,
         @intCast(ctx.width),
         @intCast(ctx.height),
         "out.gif",

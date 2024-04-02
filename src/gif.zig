@@ -44,6 +44,7 @@ fn initFrameConfig(conf: *cgif.CGIF_FrameConfig, delay: u16) void {
 pub fn bgraFrames2Gif(
     allocator: std.mem.Allocator,
     frames: []const []const u8,
+    _: usize,
     width: usize,
     height: usize,
     path: [:0]const u8,
@@ -52,12 +53,14 @@ pub fn bgraFrames2Gif(
     const rgb_buf = try allocator.alloc(u8, width * height * 3);
     defer allocator.free(rgb_buf);
 
+    const fps: u16 = 2;
+
     var gif_config: cgif.CGIF_Config = undefined;
     initGifConfig(&gif_config, path, width, height);
     gif_config.attrFlags = cgif.CGIF_ATTR_NO_GLOBAL_TABLE | cgif.CGIF_ATTR_IS_ANIMATED;
 
     var frame_config: cgif.CGIF_FrameConfig = undefined;
-    initFrameConfig(&frame_config, 10);
+    initFrameConfig(&frame_config, fps);
     frame_config.attrFlags = cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE;
 
     var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
@@ -79,7 +82,6 @@ pub fn bgraFrames2Gif(
             rgb_buf[dst_base + 1] = g;
             rgb_buf[dst_base + 2] = b;
         }
-        // std.process.exit(0);
 
         // quantize the RGB buffer
         const quantized = try quant.quantize(allocator, rgb_buf);
@@ -92,7 +94,6 @@ pub fn bgraFrames2Gif(
         if (cgif.cgif_addframe(gif, &frame_config) != 0) {
             return JifError.GifConvertFailed;
         }
-        break;
     }
 
     if (cgif.cgif_close(gif) != 0) {

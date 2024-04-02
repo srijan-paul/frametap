@@ -160,10 +160,8 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
         }
     }
 
-    std.debug.assert(head.frequency > 0 and head.new_index == 0);
-
     var qcolor = head;
-    var color_count: usize = 0;
+    var color_count: usize = 1;
     for (all_colors) |*color| {
         if (color != head and color.frequency > 0) {
             qcolor.next = color;
@@ -177,6 +175,8 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     first_partition.colors = head;
     first_partition.num_colors = color_count;
     first_partition.num_pixels = n_pixels;
+
+    std.debug.assert(n_pixels == countPixels(first_partition));
 
     findWidestChannel(first_partition);
 
@@ -202,7 +202,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
         // 2. Point all colors in this partition to the index of this partition.
         var color = partition.colors;
         var rgb_sum: [3]usize = .{ 0, 0, 0 };
-        for (0..partition.num_colors) |_| {
+        for (0..partition.num_colors) |j| {
             color.new_index = @truncate(i);
 
             rgb_sum[0] += color.RGB[0];
@@ -212,7 +212,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
             if (color.next) |next| {
                 color = next;
             } else {
-                unreachable;
+                std.debug.assert(j == partition.num_colors - 1);
             }
         }
 
@@ -319,7 +319,7 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
         if (color.next) |next| {
             color = next;
         } else {
-            unreachable;
+            std.debug.assert(i == partition.num_colors - 1);
         }
     }
 
@@ -428,11 +428,11 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         findWidestChannel(partition_to_split);
         findWidestChannel(new_partition);
 
-        // add the new partition to the partitions array.
+        // Add the new partition to the partitions array.
         parts[n_partitions] = new_partition;
 
-        std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split, partition_to_split.num_colors));
-        std.debug.assert(new_partition.num_pixels == countPixels(new_partition, new_partition.num_colors));
+        std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
+        std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
     }
 
     std.debug.assert(n_partitions == total_partitions);
@@ -440,17 +440,25 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
 }
 
 /// Returns the sum of frequencies of all colors in the partition.
-fn countPixels(partition: *ColorSpace, ncolors: usize) usize {
-    var count: usize = 0;
+fn countPixels(partition: *ColorSpace) usize {
     var color = partition.colors;
-    for (0..ncolors) |_| {
-        std.debug.assert(@as(?*QuantizedColor, color) != null);
+    var count: usize = 0;
+    const ncolors = partition.num_colors;
+    for (0..ncolors) |i| {
         count += color.frequency;
         if (color.next) |next| {
             color = next;
         } else {
+            if (ncolors != i + 1) {
+                std.debug.panic(
+                    "expected {} colors, got {}\n",
+                    .{ ncolors, i + 1 },
+                );
+            }
             break;
         }
     }
+
+    std.debug.assert(color.next == null);
     return count;
 }
