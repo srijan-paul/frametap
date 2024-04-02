@@ -53,14 +53,14 @@ pub fn bgraFrames2Gif(
     const rgb_buf = try allocator.alloc(u8, width * height * 3);
     defer allocator.free(rgb_buf);
 
-    const fps: u16 = 2;
+    const timePerFrame: u16 = 2;
 
     var gif_config: cgif.CGIF_Config = undefined;
     initGifConfig(&gif_config, path, width, height);
     gif_config.attrFlags = cgif.CGIF_ATTR_NO_GLOBAL_TABLE | cgif.CGIF_ATTR_IS_ANIMATED;
 
     var frame_config: cgif.CGIF_FrameConfig = undefined;
-    initFrameConfig(&frame_config, fps);
+    initFrameConfig(&frame_config, timePerFrame);
     frame_config.attrFlags = cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE;
 
     var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
@@ -84,7 +84,7 @@ pub fn bgraFrames2Gif(
         }
 
         // quantize the RGB buffer
-        const quantized = try quant.quantize(allocator, rgb_buf);
+        const quantized = try quant.quantizeGiflib(allocator, rgb_buf);
         defer quantized.deinit(allocator);
 
         frame_config.pImageData = quantized.image_buffer.ptr;
@@ -94,6 +94,7 @@ pub fn bgraFrames2Gif(
         if (cgif.cgif_addframe(gif, &frame_config) != 0) {
             return JifError.GifConvertFailed;
         }
+        // break;
     }
 
     if (cgif.cgif_close(gif) != 0) {

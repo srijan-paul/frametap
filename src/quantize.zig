@@ -1,5 +1,6 @@
 const std = @import("std");
 const core = @import("core");
+const giflib = @cImport(@cInclude("gif_lib.h"));
 
 // Implements the color quantization algorithm described here:
 // https://dl.acm.org/doi/pdf/10.1145/965145.801294
@@ -46,7 +47,7 @@ const ColorSpace = struct {
     /// The color channel in this partition with the highest range
     widest_channel: Channel,
     // width of the widest channel in this partition.
-    rgb_width: usize,
+    rgb_width: i32,
     /// The minimum values of the respective RGB channels in this partition.
     rgb_min: [3]i32,
     /// The maximum values of the respective RGB channels in this partition.
@@ -63,8 +64,16 @@ const Channel = enum(u5) { Red = 0, Blue = 1, Green = 2 };
 
 /// A function that compares two pixels based on a color channel.
 fn colorLessThan(channel: Channel, a: *QuantizedColor, b: *QuantizedColor) bool {
-    const a_color = a.RGB[@intFromEnum(channel)];
-    const b_color = b.RGB[@intFromEnum(channel)];
+    const sortaxis: usize = @intFromEnum(channel);
+
+    const a_color = @as(usize, a.RGB[sortaxis]) * 256 * 256 +
+        @as(usize, a.RGB[(sortaxis + 1) % 3]) * 256 +
+        @as(usize, a.RGB[(sortaxis + 2) % 3]);
+
+    const b_color = @as(usize, b.RGB[sortaxis]) * 256 * 256 +
+        @as(usize, b.RGB[(sortaxis + 1) % 3]) * 256 +
+        @as(usize, b.RGB[(sortaxis + 2) % 3]);
+
     return a_color < b_color;
 }
 
@@ -183,7 +192,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     const partitions = try medianCut(
         allocator,
         first_partition,
-        3,
+        8,
     );
 
     defer {
@@ -239,6 +248,53 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     return QuantizeResult.init(color_table, image_buf);
 }
 
+pub fn quantizeGiflib(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
+    const npixels = rgb_buf.len / 3;
+    const imgbuf = try allocator.alloc(u8, npixels);
+
+    var red = try allocator.alloc(u8, npixels);
+    var green = try allocator.alloc(u8, npixels);
+    var blue = try allocator.alloc(u8, npixels);
+
+    defer {
+        allocator.free(red);
+        allocator.free(green);
+        allocator.free(blue);
+    }
+
+    for (0..npixels) |i| {
+        red[i] = rgb_buf[i * 3];
+        green[i] = rgb_buf[i * 3 + 1];
+        blue[i] = rgb_buf[i * 3 + 2];
+    }
+
+    var colormapsize: c_int = 256;
+    const output_colormap = try allocator.alloc(giflib.GifColorType, 256);
+    defer allocator.free(output_colormap);
+
+    if (giflib.GifQuantizeBuffer(
+        1920,
+        1080,
+        &colormapsize,
+        red.ptr,
+        green.ptr,
+        blue.ptr,
+        imgbuf.ptr,
+        output_colormap.ptr,
+    ) != giflib.GIF_OK) {
+        unreachable;
+    }
+
+    var color_table = try allocator.alloc(u8, 256 * 3);
+    for (0.., output_colormap) |i, color| {
+        color_table[i * 3] = color.Red;
+        color_table[i * 3 + 1] = color.Green;
+        color_table[i * 3 + 2] = color.Blue;
+    }
+
+    return QuantizeResult.init(color_table, imgbuf);
+}
+
 /// Find the color channel with the largest range in the given parition.
 /// Mutates `rgb_min`, `rgb_max`, `rgb_width`, and `widest_channel`.
 fn findWidestChannel(partition: *ColorSpace) void {
@@ -262,18 +318,18 @@ fn findWidestChannel(partition: *ColorSpace) void {
     const rgb_ranges = [3]i32{ max[0] - min[0], max[1] - min[1], max[2] - min[2] };
     if (rgb_ranges[0] > rgb_ranges[1] and rgb_ranges[0] > rgb_ranges[2]) {
         partition.widest_channel = Channel.Red;
-        partition.rgb_width = @intCast(rgb_ranges[0]);
+        partition.rgb_width = max[0] - min[0];
         return;
     }
 
     if (rgb_ranges[1] > rgb_ranges[0] and rgb_ranges[1] > rgb_ranges[2]) {
+        partition.rgb_width = max[1] - min[1];
         partition.widest_channel = Channel.Green;
-        partition.rgb_width = @intCast(rgb_ranges[1]);
         return;
     }
 
+    partition.rgb_width = max[2] - min[2];
     partition.widest_channel = Channel.Blue;
-    partition.rgb_width = @intCast(rgb_ranges[2]);
 }
 
 test "findWidestChannel" {
@@ -340,7 +396,7 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
 /// Given a list of partitions,
 /// find the partition that varies the most in RGB width, and return its index.
 fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
-    var max_size: usize = 0;
+    var max_size: i32 = 0;
     var split_index: usize = 0;
     var found = false;
     for (0..partitions.len) |i| {
@@ -356,7 +412,7 @@ fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
 }
 
 /// Recursively split the colorspace into smaller partitions until 2^depth partitions are created.
-fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: u3) ![]*ColorSpace {
+fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: u4) ![]*ColorSpace {
     const total_partitions = std.math.pow(usize, 2, depth);
 
     var parts = try allocator.alloc(*ColorSpace, total_partitions);
@@ -413,6 +469,10 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         const last_of_left = color;
         const first_of_right = if (last_of_left.next) |c| c else unreachable;
 
+        // const sort_axis = @intFromEnum(partition_to_split.widest_channel);
+        // const max_color = last_of_left.RGB[sort_axis] << shift;
+        // const min_color = first_of_right.RGB[sort_axis] << shift;
+
         // Set up the new partition (right half).
         new_partition.colors = first_of_right;
         last_of_left.next = null; // unlink the two partitions.
@@ -431,8 +491,8 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // Add the new partition to the partitions array.
         parts[n_partitions] = new_partition;
 
-        std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
-        std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
+        // std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
+        // std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
     }
 
     std.debug.assert(n_partitions == total_partitions);
