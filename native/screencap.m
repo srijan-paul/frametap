@@ -55,7 +55,10 @@ ScreenCapture *alloc_capture() {
   return sc;
 }
 
-void init_capture(ScreenCapture *sc, FrameProcessor frame_processor) {
+void init_capture(
+    ScreenCapture *sc, CaptureRect rect, FrameProcessor frame_processor
+) {
+  sc->region = rect;
   sc->frame_processor = frame_processor;
   sc->should_stop_capture = false;
   sc->displayID = CGMainDisplayID();
@@ -94,11 +97,19 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   sc->filter = [[SCContentFilter alloc] initWithDisplay:sc->display
                                        includingWindows:windows];
 
+  const CaptureRect *rect = &sc->region;
+  const CGFloat bottom_left_y = rect->topleft_y + rect->height;
+  const CGFloat bottom_left_x = rect->topleft_x;
+  CGRect cg_rect =
+      CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
+
   sc->conf = [[SCStreamConfiguration alloc] init];
   [sc->conf setPixelFormat:'BGRA'];
   [sc->conf setCapturesAudio:NO];
   [sc->conf setShowsCursor:YES];
   [sc->conf setMinimumFrameInterval:kCMTimeZero];
+  [sc->conf setSourceRect:cg_rect];
+  [sc->conf setDestinationRect:cg_rect];
 
   sc->stream = [[SCStream alloc] initWithFilter:sc->filter
                                   configuration:sc->conf

@@ -9,6 +9,7 @@
 @end
 
 struct ScreenCapture {
+  CaptureRect region;
   SCStream *stream;
   SCStreamConfiguration *conf;
   SCContentFilter *filter;

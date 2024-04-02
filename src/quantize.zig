@@ -484,8 +484,8 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // Add the new partition to the partitions array.
         parts[n_partitions] = new_partition;
 
-        //  std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
-        // std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
+        std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));
+        std.debug.assert(new_partition.num_pixels == countPixels(new_partition));
     }
 
     if (n_partitions != total_partitions) {

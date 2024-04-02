@@ -68,8 +68,14 @@ pub fn main() !void {
     frame_processor.other_data = &ctx;
     frame_processor.process_fn = process_frame;
 
+    const rect: screencap.CaptureRect = .{
+        .topleft_x = 200,
+        .topleft_y = 200,
+        .width = 500,
+        .height = 500,
+    };
     const sc = screencap.alloc_capture().?;
-    screencap.init_capture(sc, frame_processor);
+    screencap.init_capture(sc, rect, frame_processor);
 
     const thread = try std.Thread.spawn(.{}, start_capturing, .{sc});
     std.time.sleep(std.time.ns_per_s * 4);
