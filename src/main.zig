@@ -32,7 +32,7 @@ pub const GifContext = struct {
     }
 };
 
-export fn process_frame(
+export fn processFrame(
     frame: [*c]u8,
     w: usize,
     h: usize,
@@ -53,11 +53,11 @@ export fn process_frame(
     gif_ctx.frames.append(buf) catch std.debug.panic("WTF", .{});
 }
 
-fn start_capturing(sc: *screencap.ScreenCapture) void {
+fn startCapture(sc: *screencap.ScreenCapture) void {
     _ = screencap.start_capture_and_wait(sc);
 }
 
-pub fn main() !void {
+pub fn main_() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -66,28 +66,16 @@ pub fn main() !void {
 
     var frame_processor: screencap.FrameProcessor = undefined;
     frame_processor.other_data = &ctx;
-    frame_processor.process_fn = process_frame;
+    frame_processor.process_fn = processFrame;
 
-    const rect: screencap.CaptureRect = .{
-        .topleft_x = 200,
-        .topleft_y = 200,
-        .width = 500,
-        .height = 500,
-    };
     const sc = screencap.alloc_capture().?;
-    screencap.init_capture(sc, rect, frame_processor);
+    screencap.init_capture(sc, frame_processor);
 
-    const thread = try std.Thread.spawn(.{}, start_capturing, .{sc});
+    const thread = try std.Thread.spawn(.{}, startCapture, .{sc});
     std.time.sleep(std.time.ns_per_s * 4);
 
     screencap.stop_capture(sc);
     thread.join();
-
-    // for (0.., ctx.frames.items) |i, frame| {
-    //     const filename = try std.fmt.allocPrint(allocator, "frames/frame-{}.bin", .{i});
-    //     const file = try std.fs.cwd().createFile(filename, .{ .read = true });
-    //     try file.writeAll(frame);
-    // }
     try gif.bgraFrames2Gif(
         allocator,
         ctx.frames.items,
@@ -98,31 +86,21 @@ pub fn main() !void {
     );
 }
 
-pub fn main2() !void {
+pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var context = try mac.MacOSCaptureContext.init(
-        core.Rect{ .x = 0, .y = 0, .width = 1920, .height = 1080 },
-        allocator,
-    );
-    defer context.deinit();
+    var capture = try core.makeCapture(allocator, null);
 
     const then = std.time.milliTimestamp();
-
-    for (0..20) |_| {
-        try context.captureFrame();
-    }
+    const frame = try capture.screenshot(null);
     const now = std.time.milliTimestamp();
 
     const delta = now - then;
-    std.debug.print("Took {} snapshots in {}ms\n", .{
-        context.ctx.frames.items.len,
-        delta,
-    });
+
+    std.debug.print("{}x{} screenshot took: {} (size: {})\n", .{ frame.width, frame.height, delta, frame.data.len });
 
     const dir = std.fs.cwd();
-
-    const file = try dir.createFile("zif.png", .{ .read = true });
-    try file.writeAll(context.ctx.frames.items[0]);
+    const file = try dir.createFile("input.rgba", .{ .read = true });
+    try file.writeAll(frame.data);
 }

@@ -2,99 +2,105 @@ const std = @import("std");
 const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
 const objc = @import("objc");
 const core = @import("core.zig");
+const screencap = @cImport(@cInclude("screencap.h"));
 
 const JifError = core.JifError;
-const CaptureContext = core.CaptureContext;
+const CaptureContext = core.Capture;
 const Rect = core.Rect;
+const CaptureConfig = core.CaptureConfig;
+const Platform = core.Platform;
 
 pub const MacOSCaptureContext = struct {
     const Self = @This();
-
     allocator: std.mem.Allocator,
+    capture: core.Capture,
 
-    ctx: core.CaptureContext,
+    capture_c: *screencap.ScreenCapture,
 
-    displayID: u32,
-    color_space: c.CGColorSpaceRef,
-    cg_rect: c.CGRect,
-    cg_bitmap_context: c.CGContextRef,
+    /// MacOS specific screenshot implementation.
+    fn screenshot(ctx: *core.Capture, rect: ?Rect) !core.Frame {
+        const self = @fieldParentPtr(Self, "capture", ctx);
 
-    // CoreGraphics class handles from Objective-C runtime.
-    NSString: objc.Class,
-    NSBitmapImageRep: objc.Class,
-    NSDictionary: objc.Class,
-
-    pub fn captureFrame(self: *Self) !void {
-        const imageRef = c.CGWindowListCreateImage(
-            self.cg_rect,
-            c.kCGWindowListOptionOnScreenOnly,
-            c.kCGNullWindowID,
-            c.kCGWindowImageDefault,
-        ) orelse return JifError.ImageCreationFailed;
-
-        var bitmap = self.NSBitmapImageRep.msgSend(objc.Object, "alloc", .{});
-        bitmap = bitmap.msgSend(objc.Object, "initWithCGImage:", .{imageRef});
-
-        const emptyDict = self.NSDictionary.msgSend(objc.Object, "dictionary", .{});
-        const NSFileTypeGIF: u64 = 4;
-        const gifData = bitmap.msgSend(
-            objc.Object,
-            "representationUsingType:properties:",
-            .{ NSFileTypeGIF, emptyDict },
-        );
-        defer gifData.msgSend(void, "release", .{});
-
-        const length = gifData.msgSend(u64, "length", .{});
-        const bytes = gifData.msgSend([*c]u8, "bytes", .{});
-        const buf = try self.allocator.alloc(u8, length);
-
-        for (0..length) |i| {
-            buf[i] = bytes[i];
+        var c_frame: screencap.Frame = undefined;
+        if (rect) |r| {
+            const capture_rect = screencap.CaptureRect{
+                .topleft_x = r.x,
+                .topleft_y = r.y,
+                .width = r.width,
+                .height = r.height,
+            };
+            c_frame = screencap.capture_frame(self.capture_c, &capture_rect);
+        } else {
+            c_frame = screencap.capture_frame(self.capture_c, null);
         }
 
-        return self.ctx.frames.append(buf);
+        const framebuf = try self.allocator.alloc(u8, c_frame.rgba_buf_size);
+        const c_buf: [*]u8 = c_frame.rgba_buf;
+
+        @memcpy(framebuf, c_buf);
+
+        return core.Frame{
+            .width = c_frame.width,
+            .height = c_frame.height,
+            .data = framebuf,
+        };
     }
 
-    fn capture(ctx: *CaptureContext) !void {
+    fn startCaptureMacOS(_: *CaptureContext) !void {
+        // TODO:
+    }
+
+    fn stopCaptureMacOS(_: *CaptureContext) !void {
+        // TODO:
+    }
+
+    fn takeScreenshot(ctx: *CaptureContext) !void {
         const self = @fieldParentPtr(Self, "ctx", ctx);
-        return self.captureFrame();
+        return self.screenshot();
     }
 
-    fn record(ctx: *CaptureContext, _: u32) !void {
+    fn startCapture(ctx: *CaptureContext) !void {
         const self = @fieldParentPtr(Self, "ctx", ctx);
-        _ = self;
+        try self.startCaptureMacOS();
     }
 
-    pub fn init(rect: Rect, allocator: std.mem.Allocator) JifError!MacOSCaptureContext {
-        const nsstring = objc.getClass("NSString") orelse return JifError.NSStringClassNotFound;
-        const nsbitmapimagerep = objc.getClass("NSBitmapImageRep") orelse return JifError.NSBitmapImageRepClassNotFound;
-        const nsdictionary = objc.getClass("NSDictionary") orelse return JifError.NSDictionaryClassNotFound;
+    fn stopCapture(ctx: *CaptureContext) !void {
+        const self = @fieldParentPtr(Self, "ctx", ctx);
+        self.stopCaptureMacOS();
+    }
 
-        const colorspace = c.CGColorSpaceCreateDeviceRGB();
-        const cg_rect = c.CGRectMake(rect.x, rect.y, rect.width, rect.height);
-        return MacOSCaptureContext{
+    /// Initialize a MacOS specific capture context.
+    pub fn init(allocator: std.mem.Allocator, rect: ?Rect) JifError!MacOSCaptureContext {
+        const maybe_capture_c: ?*screencap.ScreenCapture = screencap.alloc_capture();
+        const capture_c = if (maybe_capture_c) |ptr| ptr else return JifError.InternalError;
+
+        const conf = core.CaptureConfig{
+            .captureFrameFn = Self.screenshot,
+            .rect = rect,
+            .stopRecordFn = Self.stopCaptureMacOS,
+            .startRecordFn = Self.startCaptureMacOS,
+        };
+
+        screencap.init_capture(capture_c, undefined);
+
+        if (rect) |r| {
+            const capture_rect = screencap.CaptureRect{
+                .topleft_x = r.x,
+                .topleft_y = r.y,
+                .width = r.width,
+                .height = r.height,
+            };
+            screencap.set_capture_region(capture_c, capture_rect);
+        }
+
+        return Self{
             .allocator = allocator,
-            .ctx = CaptureContext.init(rect, capture, record, allocator),
-            .displayID = c.CGMainDisplayID(),
-            .color_space = colorspace,
-            .NSString = nsstring,
-            .NSBitmapImageRep = nsbitmapimagerep,
-            .NSDictionary = nsdictionary,
-            .cg_rect = cg_rect,
-            .cg_bitmap_context = c.CGBitmapContextCreate(
-                null,
-                @intFromFloat(rect.width),
-                @intFromFloat(rect.height),
-                8,
-                0,
-                colorspace,
-                c.kCGImageAlphaPremultipliedLast,
-            ),
+            .capture_c = capture_c,
+            .capture = CaptureContext.init(Platform.MacOS, conf),
         };
     }
 
     pub fn deinit(self: MacOSCaptureContext) void {
-        c.CGColorSpaceRelease(self.color_space);
-        c.CGContextRelease(self.cg_bitmap_context);
+        screencap.deinit_capture(self.capture_c);
     }
 };

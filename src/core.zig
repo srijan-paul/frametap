@@ -1,6 +1,13 @@
 const std = @import("std");
 const objc = @import("objc");
 const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
+const macos = @import("./mac-os.zig");
+
+pub const Platform = enum {
+    MacOS,
+    Windows,
+    Linux,
+};
 
 pub const Rect = struct {
     x: f32,
@@ -9,48 +16,77 @@ pub const Rect = struct {
     height: f32,
 };
 
-pub const CaptureContext = struct {
-    const Self = @This();
-    const CaptureFun = *const (fn (*Self) anyerror!void);
-    const RecordFun = *const (fn (*Self, u32) anyerror!void);
+const ScreenshotFn = *const (fn (*Capture, rect: ?Rect) anyerror!Frame);
+const StartRecordFn = *const (fn (*Capture) anyerror!void);
+const StopRecordFn = *const (fn (*Capture) anyerror!void);
 
-    allocator: std.mem.Allocator,
-    rect: Rect,
-    frames: std.ArrayList([]u8),
-    captureFn: CaptureFun,
-    recordFn: RecordFun,
+pub const CaptureConfig = struct {
+    rect: ?Rect,
+    captureFrameFn: ScreenshotFn,
+    startRecordFn: StartRecordFn,
+    stopRecordFn: StopRecordFn,
+};
+
+const builtin = @import("builtin");
+
+/// Create a new capture object.
+pub fn makeCapture(allocator: std.mem.Allocator, rect: ?Rect) !*Capture {
+    if (builtin.os.tag == .macos) {
+        var macos_capture = try macos.MacOSCaptureContext.init(allocator, rect);
+        return &macos_capture.capture;
+    }
+
+    std.debug.panic("Platform not supported!");
+}
+
+pub const Frame = struct {
+    data: []u8,
+    width: usize,
+    height: usize,
+};
+
+pub const Capture = struct {
+    const Self = @This();
+    rect: ?Rect,
+    screenshotFn: ScreenshotFn,
+    startRecordFn: StartRecordFn,
+    stopRecordFn: StopRecordFn,
+    platform: Platform,
 
     pub fn init(
-        rect: Rect,
-        captureFn: CaptureFun,
-        recordFn: RecordFun,
-        allocator: std.mem.Allocator,
+        platform: Platform,
+        config: CaptureConfig,
     ) Self {
         return Self{
-            .allocator = allocator,
-            .rect = rect,
-            .frames = std.ArrayList([]u8).init(allocator),
-            .captureFn = captureFn,
-            .recordFn = recordFn,
+            .platform = platform,
+            .rect = config.rect,
+            .screenshotFn = config.captureFrameFn,
+            .startRecordFn = config.startRecordFn,
+            .stopRecordFn = config.stopRecordFn,
         };
     }
 
-    pub fn captureFrame(self: *Self) void {
-        self.captureFn(self);
+    /// Capture a screenshot of the screen.
+    /// If `rect` is `null`, the rect area specified while initializing the capture object will be used.
+    /// If that is `null` too, the entire screen will be captured.
+    pub fn screenshot(self: *Self, rect: ?Rect) anyerror!Frame {
+        return self.screenshotFn(self, rect);
     }
 
-    pub fn record(self: *Self, duration: u32) void {
-        self.recordFn(self, duration);
+    pub fn begin(self: *Self) !void {
+        self.startRecordFn(self);
+    }
+
+    pub fn end(self: *Self) !void {
+        self.endRecordFn(self);
     }
 };
 
 pub const JifError = error{
-    NSStringClassNotFound,
-    NSBitmapImageRepClassNotFound,
-    NSDictionaryClassNotFound,
     ImageCreationFailed,
     PNGConvertFailed,
     GifConvertFailed,
+    InternalError,
     /// Failed to write to the GIF file.
     GifFlushFailed,
 };

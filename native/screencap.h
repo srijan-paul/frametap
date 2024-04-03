@@ -33,14 +33,39 @@ typedef struct FrameProcessor {
 ScreenCapture *alloc_capture();
 
 /**
+ * Represents a single captured frame.
+ */
+typedef struct {
+  /**
+   * Color data for a single frame for the frame in RGBA format.
+   */
+  uint8_t *rgba_buf;
+  /**
+   * Size of the `rgba_buf` buffer. Always equal to width * height
+   */
+  size_t rgba_buf_size;
+  size_t width;
+  size_t height;
+} Frame;
+
+/**
  * Initializes the screen capture object.
  * `capture`: Pointer to an uninitialized ScreenCapture object.
  * `rect`: The region of the screen to capture. NULL if entire screen.
  * `on_frame`: The function to call when a frame is captured.
  */
-void init_capture(
-    ScreenCapture *capture, CaptureRect rect, FrameProcessor on_frame
-);
+void init_capture(ScreenCapture *capture, FrameProcessor on_frame);
+
+/**
+ * Get an RGBA
+ */
+Frame capture_frame(ScreenCapture *capture, const CaptureRect *rect);
+
+/**
+ * Set the region of the screen to capture.
+ * If this function isn't called, the entire screen is captured by default.
+ */
+void set_capture_region(ScreenCapture *capture, CaptureRect rect);
 
 /**
  * Starts capturing the screen.

@@ -1,5 +1,6 @@
 #import "screencap.h"
 #import "types.h"
+#include <AppKit/AppKit.h>
 #include <Foundation/Foundation.h>
 
 void process_frame(
