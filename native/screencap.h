@@ -49,6 +49,11 @@ typedef struct {
 } Frame;
 
 /**
+ * Destroy a frame.
+ */
+void deinit_frame(Frame *frame);
+
+/**
  * Initializes the screen capture object.
  * `capture`: Pointer to an uninitialized ScreenCapture object.
  * `rect`: The region of the screen to capture. NULL if entire screen.
@@ -87,4 +92,4 @@ void stop_capture(ScreenCapture *capture);
 /**
  * free any resources associated with the ScreenCapture object.
  */
-bool deinit_capture(ScreenCapture *capture);
+void deinit_capture(ScreenCapture *capture);

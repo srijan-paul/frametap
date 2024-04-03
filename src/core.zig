@@ -29,16 +29,6 @@ pub const CaptureConfig = struct {
 
 const builtin = @import("builtin");
 
-/// Create a new capture object.
-pub fn makeCapture(allocator: std.mem.Allocator, rect: ?Rect) !*Capture {
-    if (builtin.os.tag == .macos) {
-        var macos_capture = try macos.MacOSCaptureContext.init(allocator, rect);
-        return &macos_capture.capture;
-    }
-
-    std.debug.panic("Platform not supported!");
-}
-
 pub const Frame = struct {
     data: []u8,
     width: usize,
@@ -66,6 +56,26 @@ pub const Capture = struct {
         };
     }
 
+    /// Create a new capture object.
+    pub fn create(allocator: std.mem.Allocator, rect: ?Rect) !*Capture {
+        if (builtin.os.tag == .macos) {
+            var macos_capture = try macos.MacOSCaptureContext.init(allocator, rect);
+            return &macos_capture.capture;
+        }
+
+        return JifError.PlatformNotSupported;
+    }
+
+    pub fn destroy(self: *Self) void {
+        if (builtin.os.tag == .macos) {
+            const macos_capture = @fieldParentPtr(macos.MacOSCaptureContext, "capture", self);
+            macos_capture.deinit();
+            return;
+        }
+
+        unreachable;
+    }
+
     /// Capture a screenshot of the screen.
     /// If `rect` is `null`, the rect area specified while initializing the capture object will be used.
     /// If that is `null` too, the entire screen will be captured.
@@ -84,6 +94,7 @@ pub const Capture = struct {
 
 pub const JifError = error{
     ImageCreationFailed,
+    PlatformNotSupported,
     PNGConvertFailed,
     GifConvertFailed,
     InternalError,

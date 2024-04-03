@@ -90,7 +90,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var capture = try core.makeCapture(allocator, null);
+    var capture = try core.Capture.create(allocator, null);
+    defer capture.destroy();
 
     const then = std.time.milliTimestamp();
     const frame = try capture.screenshot(null);

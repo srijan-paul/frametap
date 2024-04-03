@@ -71,9 +71,9 @@ void init_capture(ScreenCapture *sc, FrameProcessor frame_processor) {
   sc->capture_done = dispatch_semaphore_create(0);
 }
 
-void set_capture_region(ScreenCapture *capture, CaptureRect rect) {
-  capture->region = malloc(sizeof(CaptureRect));
-  memcpy(capture->region, &rect, sizeof(CaptureRect));
+void set_capture_region(ScreenCapture *sc, CaptureRect rect) {
+  sc->region = malloc(sizeof(CaptureRect));
+  memcpy(sc->region, &rect, sizeof(CaptureRect));
 }
 
 bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
@@ -326,8 +326,26 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   return frame;
 }
 
+void deinit_frame(Frame *frame) {
+  if (frame == nil)
+    return;
+
+  if (frame->rgba_buf != nil) {
+    free(frame->rgba_buf);
+  }
+
+  frame->rgba_buf = nil;
+  frame->rgba_buf_size = 0;
+  frame->width = 0;
+  frame->height = 0;
+}
+
 // not much to do on MacOS with ARC enabled :)
-bool deinit_capture(ScreenCapture *sc) {
-  free(sc->region);
-  return true;
+void deinit_capture(ScreenCapture *sc) {
+  if (sc == nil) {
+    return;
+  }
+  if (sc->region != nil) {
+    free(sc->region);
+  }
 }

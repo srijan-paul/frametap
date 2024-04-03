@@ -38,7 +38,6 @@ pub const MacOSCaptureContext = struct {
         const c_buf: [*]u8 = c_frame.rgba_buf;
 
         @memcpy(framebuf, c_buf);
-
         return core.Frame{
             .width = c_frame.width,
             .height = c_frame.height,
@@ -101,6 +100,6 @@ pub const MacOSCaptureContext = struct {
     }
 
     pub fn deinit(self: MacOSCaptureContext) void {
-        screencap.deinit_capture(self.capture_c);
+        _ = screencap.deinit_capture(self.capture_c);
     }
 };
