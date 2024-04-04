@@ -38,29 +38,3 @@ pub fn onFrame(frames: *std.ArrayList(core.Frame), frame: core.Frame) !void {
     try frames.append(frame);
     std.debug.print("frame: {}x{}\n", .{ frame.width, frame.height });
 }
-
-pub fn main2() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var frames = std.ArrayList(core.Frame).init(allocator);
-    const FrameTap = core.FrameTap(*std.ArrayList(core.Frame));
-    var frametap = try FrameTap.init(allocator, &frames, onFrame);
-
-    defer {
-        frametap.deinit();
-        frames.deinit();
-    }
-
-    const then = std.time.milliTimestamp();
-    const frame = try frametap.capture.screenshot(null);
-    const now = std.time.milliTimestamp();
-
-    const delta = now - then;
-
-    std.debug.print("{}x{} screenshot took: {} (size: {})\n", .{ frame.width, frame.height, delta, frame.data.len });
-
-    const dir = std.fs.cwd();
-    const file = try dir.createFile("input.rgba", .{ .read = true });
-    try file.writeAll(frame.data);
-}
