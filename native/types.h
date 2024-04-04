@@ -25,4 +25,5 @@ struct ScreenCapture {
   dispatch_semaphore_t capture_done;
   bool should_stop_capture;
   FrameProcessor frame_processor;
+  bool has_frame_processor;
 };

@@ -3,6 +3,7 @@
 #include <CoreGraphics/CGBitmapContext.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <CoreMedia/CoreMedia.h>
+#include <MacTypes.h>
 
 @implementation OutputProcessor
 
@@ -43,10 +44,12 @@
   size_t const width = CVPixelBufferGetWidth(pixelBuffer);
   size_t const height = CVPixelBufferGetHeight(pixelBuffer);
 
-  self.frame_processor.process_fn(
-      baseAddress, width, height, bytesPerRow, self.frame_processor.other_data
-  );
-
+  // If the user provided a callback function to process the frame, call it.
+  if (self.sc->has_frame_processor) {
+    self.sc->frame_processor.process_fn(
+        baseAddress, width, height, bytesPerRow, self.frame_processor.other_data
+    );
+  }
   // Unlock the pixel buffer
   CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
 }
@@ -57,9 +60,9 @@ ScreenCapture *alloc_capture() {
   return sc;
 }
 
-void init_capture(ScreenCapture *sc, FrameProcessor frame_processor) {
+void init_capture(ScreenCapture *sc) {
   sc->region = nil; // capture entire screen by default.
-  sc->frame_processor = frame_processor;
+  sc->has_frame_processor = false;
   sc->should_stop_capture = false;
   sc->displayID = CGMainDisplayID();
   sc->display = nil;
@@ -71,15 +74,18 @@ void init_capture(ScreenCapture *sc, FrameProcessor frame_processor) {
   sc->capture_done = dispatch_semaphore_create(0);
 }
 
+void set_on_frame_handler(ScreenCapture *sc, FrameProcessor processor) {
+  sc->frame_processor = processor;
+  sc->has_frame_processor = true;
+}
+
 void set_capture_region(ScreenCapture *sc, CaptureRect rect) {
   sc->region = malloc(sizeof(CaptureRect));
   memcpy(sc->region, &rect, sizeof(CaptureRect));
 }
 
 bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
-
   sc->displayID = CGMainDisplayID();
-
   sc->displays = [content displays];
 
   for (SCDisplay *d in sc->displays) {
@@ -109,8 +115,8 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   [sc->conf setMinimumFrameInterval:kCMTimeZero];
 
   // If the user has provided a region to capture, capture only that area.
-  const CaptureRect *rect = sc->region;
-  if (rect != nil) {
+  if (sc->region != nil) {
+    const CaptureRect *rect = sc->region;
     const CGFloat bottom_left_y = rect->topleft_y + rect->height;
     const CGFloat bottom_left_x = rect->topleft_x;
     CGRect cg_rect =
@@ -167,18 +173,26 @@ typedef void (^ShareableContentCompletionHandler)(
 );
 
 bool start_capture(ScreenCapture *sc) {
+  // If the user hasn't provided a callback function to process frames,
+  // there isn't any point in starting a live screen capture.
+  if (!sc->has_frame_processor) {
+    return false;
+  }
+
   dispatch_semaphore_t sharable_content_available =
       dispatch_semaphore_create(0);
 
   __block bool ok = true;
-  __block SCShareableContent *content;
+  __block SCShareableContent *content = nil;
   ShareableContentCompletionHandler handler =
       ^(SCShareableContent *shareableContent, NSError *err) {
         ok = err == nil;
         if (!ok) {
           sc->error = err;
         }
+
         content = shareableContent;
+        [content retain];
         dispatch_semaphore_signal(sharable_content_available);
       };
 
@@ -187,6 +201,7 @@ bool start_capture(ScreenCapture *sc) {
                                                completionHandler:handler];
 
   dispatch_semaphore_wait(sharable_content_available, DISPATCH_TIME_FOREVER);
+  dispatch_release(sharable_content_available);
 
   if (!ok) {
     return false;
@@ -209,14 +224,12 @@ bool start_capture_and_wait(ScreenCapture *capture) {
   if (!start_capture(capture)) {
     return false;
   }
-
   dispatch_semaphore_wait(capture->capture_done, DISPATCH_TIME_FOREVER);
   return true;
 }
 
 void stop_capture(ScreenCapture *sc) {
   dispatch_semaphore_signal(sc->capture_done);
-
   dispatch_semaphore_t finished = dispatch_semaphore_create(0);
   [sc->stream stopCaptureWithCompletionHandler:^(NSError *_Nullable error) {
     if (error != nil) {
@@ -261,7 +274,8 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
     captureBounds = CGDisplayBounds(sc->displayID);
   } else {
     // Use the provided rect for capture bounds
-    captureBounds = transform_to_cg_coord_space(rect);
+    captureBounds =
+        CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
   }
 
   // The original image will be scaled up to fit the HiDPI screen.

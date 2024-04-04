@@ -4,6 +4,27 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/**
+ * Represents a single captured frame.
+ */
+typedef struct {
+  /**
+   * Color data for a single frame for the frame in RGBA format.
+   */
+  uint8_t *rgba_buf;
+  /**
+   * Size of the `rgba_buf` buffer. Always equal to width * height
+   */
+  size_t rgba_buf_size;
+  size_t width;
+  size_t height;
+} Frame;
+
+/**
+ * Destroy a frame.
+ */
+void deinit_frame(Frame *frame);
+
 // Represents a screen region to be captured.
 typedef struct CaptureRect {
   double topleft_x;
@@ -33,38 +54,15 @@ typedef struct FrameProcessor {
 ScreenCapture *alloc_capture();
 
 /**
- * Represents a single captured frame.
- */
-typedef struct {
-  /**
-   * Color data for a single frame for the frame in RGBA format.
-   */
-  uint8_t *rgba_buf;
-  /**
-   * Size of the `rgba_buf` buffer. Always equal to width * height
-   */
-  size_t rgba_buf_size;
-  size_t width;
-  size_t height;
-} Frame;
-
-/**
- * Destroy a frame.
- */
-void deinit_frame(Frame *frame);
-
-/**
  * Initializes the screen capture object.
  * `capture`: Pointer to an uninitialized ScreenCapture object.
- * `rect`: The region of the screen to capture. NULL if entire screen.
- * `on_frame`: The function to call when a frame is captured.
  */
-void init_capture(ScreenCapture *capture, FrameProcessor on_frame);
+void init_capture(ScreenCapture *sc);
 
 /**
- * Get an RGBA
+ * Set a callback handler to process the captured frames.
  */
-Frame capture_frame(ScreenCapture *capture, const CaptureRect *rect);
+void set_on_frame_handler(ScreenCapture *sc, FrameProcessor processor);
 
 /**
  * Set the region of the screen to capture.
@@ -88,6 +86,11 @@ bool start_capture_and_wait(ScreenCapture *capture);
  * `capture`: The screen capture object.
  */
 void stop_capture(ScreenCapture *capture);
+
+/**
+ * Get an RGBA buffer from the current screen contents.
+ */
+Frame capture_frame(ScreenCapture *capture, const CaptureRect *rect);
 
 /**
  * free any resources associated with the ScreenCapture object.
