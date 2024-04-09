@@ -14,15 +14,24 @@ pub fn main() !void {
     var frames = std.ArrayList(core.Frame).init(allocator);
     const FrameTap = core.FrameTap(*std.ArrayList(core.Frame));
     var frametap = try FrameTap.init(allocator, &frames, onFrame);
-    try frametap.capture.begin();
+    // try frametap.capture.begin();
 
-    defer {
-        frametap.deinit();
-        for (frames.items) |frame| {
-            allocator.free(frame.data);
-        }
-        frames.deinit();
-    }
+    const frame = try frametap.capture.screenshot(null);
+    const file_path = "screenshot.png";
+    try png.writeRgbaToPng(
+        frame.data,
+        frame.width,
+        frame.height,
+        file_path,
+    );
+
+    // defer {
+    //     frametap.deinit();
+    //     for (frames.items) |frame| {
+    //         allocator.free(frame.data);
+    //     }
+    //     frames.deinit();
+    // }
 
     // try gif.bgraFrames2Gif(
     //     allocator,

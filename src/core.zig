@@ -142,7 +142,6 @@ pub fn FrameTap(comptime TContext: type) type {
                 onFrameCallback,
                 self,
             );
-            _ = try capture.screenshot(null);
 
             self.* = Self{
                 .capture = capture,

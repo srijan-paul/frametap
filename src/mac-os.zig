@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
+const core_graphics = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
 const objc = @import("objc");
 const core = @import("core.zig");
 const screencap = @cImport(@cInclude("screencap.h"));
