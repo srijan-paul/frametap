@@ -19,6 +19,7 @@ struct ScreenCapture {
   NSError *error;
 
   CGDirectDisplayID displayID;
+  NSScreen *screen;
   NSArray<SCDisplay *> *displays;
   NSArray<SCWindow *> *windows;
 

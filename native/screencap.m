@@ -65,6 +65,20 @@ void init_capture(ScreenCapture *sc) {
   sc->has_frame_processor = false;
   sc->should_stop_capture = false;
   sc->displayID = CGMainDisplayID();
+
+  NSArray<NSScreen *> *screens = [NSScreen screens];
+
+  // Iterate through screens to find the one with matching display ID
+  NSScreen *targetScreen = nil;
+  for (NSScreen *screen in screens) {
+    NSDictionary *screenDescription = [screen deviceDescription];
+    NSNumber *screenID = [screenDescription objectForKey:@"NSScreenNumber"];
+    if (screenID.intValue == sc->displayID) {
+      sc->screen = screen;
+      break;
+    }
+  }
+
   sc->display = nil;
   sc->error = nil;
   sc->conf = nil;
@@ -272,41 +286,47 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
     }
 
     captureBounds = CGDisplayBounds(sc->displayID);
+
   } else {
     // Use the provided rect for capture bounds
     captureBounds =
         CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
   }
 
-  // The original image will be scaled up to fit the HiDPI screen.
-  CGImageRef bigImage =
-      CGDisplayCreateImageForRect(sc->displayID, captureBounds);
+  size_t const displayHeightPx = CGDisplayPixelsHigh(sc->displayID);
+  size_t const displayWidthPx = CGDisplayPixelsWide(sc->displayID);
 
-  // Prepare to create a bitmap context for converting the image to RGBA, and
-  // scaling it down.
-  size_t const width = CGImageGetWidth(bigImage);
-  size_t const height = CGImageGetHeight(bigImage);
-  size_t const bitsPerComponent = 8;
-  size_t const bytesPerPixel = 4;
+  CGFloat scale = sc->screen.backingScaleFactor;
+  captureBounds.size.width *= scale;
+  captureBounds.size.height *= scale;
 
-  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+  CGImageRef image = CGDisplayCreateImageForRect(sc->displayID, captureBounds);
+  // TODO: handle this case. Image can be NULL, when displayID is invalid.
+  assert(image != nil);
+
+  // Prepare to create a bitmap context to draw the image on.
+  size_t const width = CGImageGetWidth(image);
+  size_t const height = CGImageGetHeight(image);
+  size_t const bytesPerRow = CGImageGetBytesPerRow(image);
+  size_t const bitsPerComponent = 8; // 8-bit per color channel.
+  size_t const bytesPerPixel = 4;    // 4 bytes per pixel (RGBA)
+  size_t const bufferLength = bytesPerRow * height;
+  CGColorSpaceRef const colorSpace = CGImageGetColorSpace(image);
+
+  assert(bytesPerPixel * width == bytesPerRow);
+
+  uint8_t *pixelData = (uint8_t *)malloc(bufferLength);
+
   CGContextRef context = CGBitmapContextCreate(
-      NULL, CGRectGetWidth(captureBounds), CGRectGetHeight(captureBounds),
-      bitsPerComponent, 0, colorSpace, CGImageGetBitmapInfo(bigImage)
+      pixelData, width, height, bitsPerComponent, bytesPerRow, colorSpace,
+      CGImageGetBitmapInfo(image)
   );
 
+  NSLog(@"captured %zux%zu image\n", CGBitmapContextGetWidth(context), height);
+
   // Draw the image into the bitmap context
-  CGContextDrawImage(context, captureBounds, bigImage);
+  CGContextDrawImage(context, captureBounds, image);
 
-  size_t const finalWidth = CGBitmapContextGetWidth(context);
-  size_t const finalHeight = CGBitmapContextGetHeight(context);
-
-  assert(captureBounds.size.width == finalWidth);
-  assert(captureBounds.size.height == finalHeight);
-
-  size_t const bytesPerRow = CGBitmapContextGetBytesPerRow(context);
-  size_t const bufferLength = bytesPerRow * finalHeight;
-  uint8_t *pixelData = CGBitmapContextGetData(context);
   // TODO: handle this case.
   assert(pixelData != NULL);
 
@@ -330,12 +350,13 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   Frame frame;
   frame.rgba_buf = outputBuf;
   frame.rgba_buf_size = bufferLength;
-  frame.width = finalWidth;
-  frame.height = finalHeight;
+  frame.width = width;
+  frame.height = height;
 
   CGColorSpaceRelease(colorSpace);
   CGContextRelease(context);
-  CGImageRelease(bigImage);
+  CGImageRelease(image);
+  free(pixelData);
 
   return frame;
 }
