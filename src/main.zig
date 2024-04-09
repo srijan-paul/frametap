@@ -18,12 +18,7 @@ pub fn main() !void {
 
     const frame = try frametap.capture.screenshot(null);
     const file_path = "screenshot.png";
-    try png.writeRgbaToPng(
-        frame.data,
-        frame.width,
-        frame.height,
-        file_path,
-    );
+    try frame.writePNG(file_path);
 
     // defer {
     //     frametap.deinit();

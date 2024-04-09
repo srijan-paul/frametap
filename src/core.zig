@@ -2,6 +2,7 @@ const std = @import("std");
 const objc = @import("objc");
 const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
 const macos = @import("./mac-os.zig");
+const png = @import("./png.zig");
 
 pub const Platform = enum {
     MacOS,
@@ -41,6 +42,11 @@ pub const Frame = struct {
     width: usize,
     /// Height of the frame in pixels.
     height: usize,
+
+    /// Export the frame as a PNG file.
+    pub fn writePNG(self: *const Frame, filepath: [:0]const u8) !void {
+        try png.writeRgbaToPng(self.data, self.width, self.height, filepath);
+    }
 };
 
 pub const Capture = struct {
