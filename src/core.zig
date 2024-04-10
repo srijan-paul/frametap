@@ -44,7 +44,7 @@ pub const Frame = struct {
     height: usize,
 
     /// Export the frame as a PNG file.
-    pub fn writePNG(self: *const Frame, filepath: [:0]const u8) !void {
+    pub fn writePng(self: *const Frame, filepath: [:0]const u8) !void {
         try png.writeRgbaToPng(self.data, self.width, self.height, filepath);
     }
 };

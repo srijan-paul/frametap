@@ -2,8 +2,6 @@ pub const core = @import("core.zig");
 const std = @import("std");
 const gif = @import("gif.zig");
 
-const Thread = std.Thread;
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -13,9 +11,14 @@ pub fn main() !void {
     var frametap = try FrameTap.init(allocator, &frames, onFrame);
     // try frametap.capture.begin();
 
-    const frame = try frametap.capture.screenshot(null);
-    const file_path = "screenshot.png";
-    try frame.writePNG(file_path);
+    const area = core.Rect{
+        .x = 0,
+        .y = 0,
+        .width = 100,
+        .height = 50,
+    };
+    const frame = try frametap.capture.screenshot(area);
+    try frame.writePng("screenshot.png");
 
     // defer {
     //     frametap.deinit();

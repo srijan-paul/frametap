@@ -65,20 +65,6 @@ void init_capture(ScreenCapture *sc) {
   sc->has_frame_processor = false;
   sc->should_stop_capture = false;
   sc->displayID = CGMainDisplayID();
-
-  NSArray<NSScreen *> *screens = [NSScreen screens];
-
-  // Iterate through screens to find the one with matching display ID
-  NSScreen *targetScreen = nil;
-  for (NSScreen *screen in screens) {
-    NSDictionary *screenDescription = [screen deviceDescription];
-    NSNumber *screenID = [screenDescription objectForKey:@"NSScreenNumber"];
-    if (screenID.intValue == sc->displayID) {
-      sc->screen = screen;
-      break;
-    }
-  }
-
   sc->display = nil;
   sc->error = nil;
   sc->conf = nil;
@@ -255,25 +241,6 @@ void stop_capture(ScreenCapture *sc) {
   dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
 }
 
-/**
- * Adjust `rect` to a coordinate space that has its origin bottom left corner.
- * `rect`: A rectangle with origin at the top left corner.
- * The CGRect that is returned has its origin and coordinate space adjusted to
- * fit MacOS's conventions.
- */
-static CGRect transform_to_cg_coord_space(const CaptureRect *const rect) {
-  CGFloat const display_height = CGDisplayPixelsHigh(CGMainDisplayID());
-
-  // center x when seem from bottom left as the origin
-  CGFloat const center_x = rect->topleft_x + rect->width / 2;
-  // center y when seem from top left corner as the origin
-  CGFloat const center_y_from_topleft = rect->topleft_y + rect->height / 2;
-  CGFloat const center_y = display_height - center_y_from_topleft;
-
-  return CGRectMake(center_x, center_y, rect->width, rect->height);
-}
-
-// TODO: add ability to not downscale on HiDPI displays.
 Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   // Determine capture bounds
   CGRect captureBounds;
@@ -283,22 +250,14 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
       captureBounds = CGRectMake(
           region->topleft_x, region->topleft_y, region->width, region->height
       );
+    } else {
+      captureBounds = CGDisplayBounds(sc->displayID);
     }
-
-    captureBounds = CGDisplayBounds(sc->displayID);
-
   } else {
     // Use the provided rect for capture bounds
     captureBounds =
         CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
   }
-
-  size_t const displayHeightPx = CGDisplayPixelsHigh(sc->displayID);
-  size_t const displayWidthPx = CGDisplayPixelsWide(sc->displayID);
-
-  CGFloat scale = sc->screen.backingScaleFactor;
-  captureBounds.size.width *= scale;
-  captureBounds.size.height *= scale;
 
   CGImageRef image = CGDisplayCreateImageForRect(sc->displayID, captureBounds);
   // TODO: handle this case. Image can be NULL, when displayID is invalid.
@@ -310,22 +269,25 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   size_t const bytesPerRow = CGImageGetBytesPerRow(image);
   size_t const bitsPerComponent = 8; // 8-bit per color channel.
   size_t const bytesPerPixel = 4;    // 4 bytes per pixel (RGBA)
-  size_t const bufferLength = bytesPerRow * height;
-  CGColorSpaceRef const colorSpace = CGImageGetColorSpace(image);
 
-  assert(bytesPerPixel * width == bytesPerRow);
+  // Intuition says that bytes per row = width in pixels * bytes per pixel.
+  // This isn't always true, however.
+  // Sometimes, bytesPerRow =/= width * bytesPerPixel.
+  // This is because the OS might add padding bytes to each row.
+  size_t const expectedBytesPerRow = width * bytesPerPixel;
+  size_t const paddingPerRow = bytesPerRow - (width * bytesPerPixel);
+  size_t const bufferLength = (bytesPerRow - paddingPerRow) * height;
+  assert(bytesPerRow - paddingPerRow == width * bytesPerPixel);
 
   uint8_t *pixelData = (uint8_t *)malloc(bufferLength);
-
   CGContextRef context = CGBitmapContextCreate(
-      pixelData, width, height, bitsPerComponent, bytesPerRow, colorSpace,
-      CGImageGetBitmapInfo(image)
+      pixelData, width, height, bitsPerComponent, expectedBytesPerRow,
+      CGImageGetColorSpace(image), CGImageGetBitmapInfo(image)
   );
 
-  NSLog(@"captured %zux%zu image\n", CGBitmapContextGetWidth(context), height);
-
+  CGRect const dstRect = CGRectMake(0, 0, width, height);
   // Draw the image into the bitmap context
-  CGContextDrawImage(context, captureBounds, image);
+  CGContextDrawImage(context, dstRect, image);
 
   // TODO: handle this case.
   assert(pixelData != NULL);
@@ -353,7 +315,6 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   frame.width = width;
   frame.height = height;
 
-  CGColorSpaceRelease(colorSpace);
   CGContextRelease(context);
   CGImageRelease(image);
   free(pixelData);
