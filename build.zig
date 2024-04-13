@@ -67,20 +67,45 @@ pub fn build(b: *std.Build) void {
         .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c"),
     });
 
-    lib.root_module.addImport("objc", objc.module("objc"));
-    lib.linkSystemLibrary("objc");
-    lib.linkFramework("Foundation");
-    lib.linkFramework("AppKit");
-    lib.addIncludePath(std.Build.LazyPath.relative("native"));
+    exe.linkLibC();
 
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the executable");
     run_step.dependOn(&run_exe.step);
 
+    const dll = b.addSharedLibrary(.{
+        .name = "frametap",
+        .root_source_file = .{ .path = "src/lib.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // macOS specific
+    dll.root_module.addImport("objc", objc.module("objc"));
+    dll.linkSystemLibrary("objc");
+    dll.linkFramework("Foundation");
+    dll.linkFramework("AppKit");
+    dll.linkFramework("ScreenCaptureKit");
+    dll.linkFramework("CoreVideo");
+    dll.linkFramework("CoreMedia");
+
+    // macOS screencapture implementation
+    dll.addIncludePath(std.Build.LazyPath.relative("native"));
+    dll.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+
+    // lodepng
+    dll.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
+    dll.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
+
+    const dll_artifact = b.addInstallArtifact(dll, .{});
+    const dll_step = b.step("dll", "Make shared library");
+    dll_step.dependOn(&dll_artifact.step);
+
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(lib);
+    b.installArtifact(dll);
     b.installArtifact(exe);
 
     // Creates a step for unit testing. This only builds the test executable

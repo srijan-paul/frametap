@@ -96,7 +96,6 @@ pub const MacOSScreenCapture = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         rect: ?Rect,
-        onFrameReceived: core.OpaqueFrameHandler,
         frametap: *anyopaque,
     ) JifError!MacOSScreenCapture {
         const maybe_capture_c: ?*screencap.ScreenCapture = screencap.alloc_capture();
@@ -107,7 +106,7 @@ pub const MacOSScreenCapture = struct {
             .screenshotFn = Self.screenshot,
             .stopRecordFn = Self.stopCaptureMacOS,
             .startRecordFn = Self.startCaptureMacOS,
-            .onFrameReceived = onFrameReceived,
+            .onFrameReceived = null,
         };
 
         screencap.init_capture(capture_c);

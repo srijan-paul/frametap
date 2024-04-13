@@ -6,17 +6,16 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var frames = std.ArrayList(core.Frame).init(allocator);
-    const FrameTap = core.FrameTap(*std.ArrayList(core.Frame));
-    var frametap = try FrameTap.init(allocator, &frames, onFrame);
-    // try frametap.capture.begin();
+    const FrameTap = core.FrameTap(?*anyopaque);
+    var frametap = try FrameTap.init(allocator, null);
 
     const area = core.Rect{
         .x = 0,
         .y = 0,
-        .width = 100,
-        .height = 50,
+        .width = 1000,
+        .height = 1000,
     };
+
     const frame = try frametap.capture.screenshot(area);
     try frame.writePng("screenshot.png");
 
@@ -36,9 +35,4 @@ pub fn main() !void {
     //     @intCast(ctx.height),
     //     "out.gif",
     // );
-}
-
-pub fn onFrame(frames: *std.ArrayList(core.Frame), frame: core.Frame) !void {
-    try frames.append(frame);
-    std.debug.print("frame: {}x{}\n", .{ frame.width, frame.height });
 }

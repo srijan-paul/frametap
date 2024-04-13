@@ -28,10 +28,14 @@ pub const CaptureConfig = struct {
     screenshotFn: ScreenshotFn,
     startRecordFn: StartRecordFn,
     stopRecordFn: StopRecordFn,
-    onFrameReceived: OpaqueFrameHandler,
+    onFrameReceived: ?OpaqueFrameHandler,
 };
 
 const builtin = @import("builtin");
+
+fn defaultFrameHandler(_: *anyopaque, _: Frame) !void {
+    std.debug.panic("No frame handler set. Call 'setFrameHandler'\n", .{});
+}
 
 /// A single frame of a video.
 pub const Frame = struct {
@@ -60,6 +64,10 @@ pub const Capture = struct {
     // This is not be set explicitly by the user, rather by the Frametap(T) struct below.
     onFrameReceived: *const fn (*anyopaque, Frame) anyerror!void,
 
+    pub fn setFrameHandler(self: *Self, frameHandler: *const fn (*anyopaque, Frame) anyerror!void) void {
+        self.onFrameReceived = frameHandler;
+    }
+
     pub fn init(
         config: CaptureConfig,
     ) Self {
@@ -68,7 +76,7 @@ pub const Capture = struct {
             .screenshotFn = config.screenshotFn,
             .startRecordFn = config.startRecordFn,
             .stopRecordFn = config.stopRecordFn,
-            .onFrameReceived = config.onFrameReceived,
+            .onFrameReceived = config.onFrameReceived orelse defaultFrameHandler,
         };
     }
 
@@ -76,7 +84,6 @@ pub const Capture = struct {
     pub fn create(
         allocator: std.mem.Allocator,
         rect: ?Rect,
-        onFrameReceived: OpaqueFrameHandler,
         frametap: *anyopaque,
     ) !*Capture {
         if (builtin.os.tag == .macos) {
@@ -84,7 +91,6 @@ pub const Capture = struct {
             macos_capture.* = try macos.MacOSScreenCapture.init(
                 allocator,
                 rect,
-                onFrameReceived,
                 frametap,
             );
             return &macos_capture.capture;
@@ -135,24 +141,30 @@ pub fn FrameTap(comptime TContext: type) type {
         context: TContext,
         processFrame: FrameHandler,
 
+        // By default, the frame handle panics and asks the user to explicitly set
+        // a callback function to handle the frames.
+        fn defaultFrameHandler(_: TContext, _: Frame) !void {
+            std.debug.panic("No frame handler set. Set a callback with 'onFrame'\n", .{});
+        }
+
         fn onFrameCallback(ptr: *anyopaque, frame: Frame) !void {
             const self: *Self = @ptrCast(@alignCast(ptr));
             try self.processFrame(self.context, frame);
         }
 
-        pub fn init(allocator: std.mem.Allocator, context: TContext, processFrame: FrameHandler) !*Self {
-            const self = try allocator.create(Self);
-            const capture = try Capture.create(
-                allocator,
-                null,
-                onFrameCallback,
-                self,
-            );
+        /// Set a callback function that will receive and process the frame.
+        pub fn onFrame(self: *Self, callback: FrameHandler) void {
+            self.processFrame = callback;
+        }
 
+        pub fn init(allocator: std.mem.Allocator, context: TContext) !*Self {
+            const self = try allocator.create(Self);
+            const capture = try Capture.create(allocator, null, self);
+            capture.setFrameHandler(&Self.onFrameCallback);
             self.* = Self{
                 .capture = capture,
                 .context = context,
-                .processFrame = processFrame,
+                .processFrame = Self.defaultFrameHandler,
             };
 
             return self;
