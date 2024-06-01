@@ -4,7 +4,7 @@ const setjmp = @cImport(@cInclude("setjmp.h"));
 const core = @import("core.zig");
 const cstdlib = @cImport(@cInclude("stdlib.h"));
 
-const JifError = core.JifError;
+const JifError = core.FrametapError;
 
 /// Convert an RGBA frame to a PNG file.
 pub fn writeRgbaToPng(

@@ -9,14 +9,14 @@ const CFrame = extern struct {
     height: usize,
 };
 
-export fn releaseFrame(frame: CFrame) void {
+pub export fn releaseFrame(frame: CFrame) void {
     const allocator = std.heap.page_allocator;
     if (frame.data != null) {
-        allocator.free(frame.data);
+        allocator.free(frame.data[0 .. frame.width * frame.height * 4]);
     }
 }
 
-export fn captureFrame(x: f32, y: f32, width: f32, height: f32) CFrame {
+pub export fn captureFrame(x: f32, y: f32, width: f32, height: f32) CFrame {
     const allocator = std.heap.page_allocator;
     const FrameTap = core.FrameTap(?*anyopaque);
     var frametap = FrameTap.init(allocator, null) catch {

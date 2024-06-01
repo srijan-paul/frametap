@@ -265,8 +265,8 @@ pub fn quantizeGiflib(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResu
     defer allocator.free(output_colormap);
 
     if (giflib.GifQuantizeBuffer(
-        1920,
-        1080,
+        800,
+        800,
         &colormapsize,
         red.ptr,
         green.ptr,
