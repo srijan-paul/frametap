@@ -6,6 +6,8 @@ const giflib = @cImport(@cInclude("gif_lib.h"));
 // https://dl.acm.org/doi/pdf/10.1145/965145.801294
 // Color Image Quantization for frame buffer display.
 // Paul Heckbert, Computer Graphics lab, New York Institute of Technology.
+//
+// Used this as reference: https://github.com/mirrorer/giflib/blob/master/lib/quantize.c
 
 pub const QuantizeResult = struct {
     const Self = @This();
@@ -65,7 +67,16 @@ const Channel = enum(u5) { Red = 0, Blue = 1, Green = 2 };
 /// A function that compares two pixels based on a color channel.
 fn colorLessThan(channel: Channel, a: *QuantizedColor, b: *QuantizedColor) bool {
     const sort_channel: usize = @intFromEnum(channel);
-    return a.RGB[sort_channel] < b.RGB[sort_channel];
+
+    const a_hash = @as(usize, a.RGB[sort_channel]) * 256 * 256 +
+        @as(usize, a.RGB[(sort_channel + 1) % 3]) * 256 +
+        @as(usize, a.RGB[(sort_channel + 2) % 3]);
+
+    const b_hash = @as(usize, b.RGB[sort_channel]) * 256 * 256 +
+        @as(usize, b.RGB[(sort_channel + 1) % 3]) * 256 +
+        @as(usize, b.RGB[(sort_channel + 2) % 3]);
+
+    return a_hash < b_hash;
 }
 
 test "pixel comparison function" {
@@ -265,8 +276,8 @@ pub fn quantizeGiflib(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResu
     defer allocator.free(output_colormap);
 
     if (giflib.GifQuantizeBuffer(
-        800,
-        800,
+        1920,
+        1080,
         &colormapsize,
         red.ptr,
         green.ptr,

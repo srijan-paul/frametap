@@ -1,9 +1,6 @@
 #import "screencap.h"
 #import "types.h"
-#include <CoreGraphics/CGBitmapContext.h>
-#include <CoreGraphics/CoreGraphics.h>
-#include <CoreMedia/CoreMedia.h>
-#include <MacTypes.h>
+#include <ScreenCaptureKit/ScreenCaptureKit.h>
 
 @implementation OutputProcessor
 
@@ -44,10 +41,37 @@
   size_t const width = CVPixelBufferGetWidth(pixelBuffer);
   size_t const height = CVPixelBufferGetHeight(pixelBuffer);
 
+  // copy the bytes within the bounds of sc->region.
+  size_t outWidth = width, outHeight = height;
+  size_t x = 0, y = 0;
+  if (self.sc->region != nil) {
+    CaptureRect const *rect = self.sc->region;
+    x = rect->topleft_x;
+    y = rect->topleft_y;
+    outWidth = rect->width;
+    outHeight = rect->height;
+  } else {
+    outWidth = width;
+    outHeight = height;
+  }
+
+  uint8_t *outputBuf = malloc(outWidth * outHeight * 4);
+  for (size_t i = y; i < outHeight; i++) {
+    for (size_t j = x; j < outWidth; j++) {
+      size_t const inIdx = (i * width + j) * 4;
+      size_t const outIdx = (i * outWidth + j) * 4;
+      outputBuf[outIdx] = baseAddress[inIdx];
+      outputBuf[outIdx + 1] = baseAddress[inIdx + 1];
+      outputBuf[outIdx + 2] = baseAddress[inIdx + 2];
+      outputBuf[outIdx + 3] = baseAddress[inIdx + 3];
+    }
+  }
+
   // If the user provided a callback function to process the frame, call it.
   if (self.sc->has_frame_processor) {
     self.sc->frame_processor.process_fn(
-        baseAddress, width, height, bytesPerRow, self.frame_processor.other_data
+        outputBuf, outWidth, outHeight, outWidth * 4,
+        self.frame_processor.other_data
     );
   }
   // Unlock the pixel buffer
@@ -121,9 +145,6 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
     // const CGFloat bottom_left_x = rect->topleft_x;
     CGRect cg_rect =
         CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
-
-    [sc->conf setSourceRect:cg_rect];
-    [sc->conf setDestinationRect:cg_rect];
   }
 
   sc->stream = [[SCStream alloc] initWithFilter:sc->filter
@@ -134,9 +155,9 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
                                 onFrameReceived:sc->frame_processor];
   NSError *err = nil;
   bool const ok = [sc->stream addStreamOutput:sc->processor
-                                   type:SCStreamOutputTypeScreen
-                     sampleHandlerQueue:nil
-                                  error:&err];
+                                         type:SCStreamOutputTypeScreen
+                           sampleHandlerQueue:nil
+                                        error:&err];
 
   if (!ok) {
     sc->error = err;
@@ -195,7 +216,7 @@ bool start_capture(ScreenCapture *sc) {
         dispatch_semaphore_signal(sharable_content_available);
       };
 
-  [SCShareableContent getShareableContentExcludingDesktopWindows:YES
+  [SCShareableContent getShareableContentExcludingDesktopWindows:NO
                                              onScreenWindowsOnly:YES
                                                completionHandler:handler];
 

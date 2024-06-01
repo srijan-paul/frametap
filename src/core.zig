@@ -199,9 +199,9 @@ pub fn FrameTap(comptime TContext: type) type {
             self.processFrame = callback;
         }
 
-        pub fn init(allocator: std.mem.Allocator, context: TContext) !*Self {
+        pub fn init(allocator: std.mem.Allocator, context: TContext, rect: ?Rect) !*Self {
             const self = try allocator.create(Self);
-            const capture = try ICapturer.create(allocator, null, self);
+            const capture = try ICapturer.create(allocator, rect, self);
             capture.setFrameHandler(&Self.onFrameCallback);
             self.* = Self{
                 .capture = capture,
