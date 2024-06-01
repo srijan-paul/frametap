@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const cgif = @cImport(@cInclude("cgif.h"));
-const JifError = @import("./core.zig").JifError;
+const FrametapError = @import("./core.zig").FrametapError;
 const quant = @import("./quantize.zig");
 
 /// Intialize a cgif gif config struct.
@@ -64,7 +64,7 @@ pub fn bgraFrames2Gif(
     frame_config.attrFlags = cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE;
 
     var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
-        return JifError.GifConvertFailed;
+        return FrametapError.GifConvertFailed;
     };
     gif = gif; // suppress non-const warning. cgif needs this to be non-const.
 
@@ -92,12 +92,12 @@ pub fn bgraFrames2Gif(
         frame_config.numLocalPaletteEntries = @intCast(quantized.color_table.len / 3);
 
         if (cgif.cgif_addframe(gif, &frame_config) != 0) {
-            return JifError.GifConvertFailed;
+            return FrametapError.GifConvertFailed;
         }
         // break;
     }
 
     if (cgif.cgif_close(gif) != 0) {
-        return JifError.GifFlushFailed;
+        return FrametapError.GifFlushFailed;
     }
 }

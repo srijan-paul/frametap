@@ -4,11 +4,50 @@ const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
 const macos = @import("./mac-os.zig");
 const png = @import("./png.zig");
 
-pub const Platform = enum {
-    MacOS,
-    Windows,
-    Linux,
-};
+// The mental model of the capture system is as follows:
+//
+//     +----------+
+// +-->| Frametap | <-----+
+// |   +----------+       |
+// |        |             |
+// |        |             |
+// |   +----------+       |
+// +---| Capturer |<----+ |
+//     +----------+     | |
+//          |           | |
+//          |           | |
+//  +----------------+  | |
+//  | OS Capturer    |--|-+
+//  +----------------+--+
+//
+// # Frametap
+//
+// The `Frametap` struct is the user facing API that allows the user to set
+// a callback function to run on every-frame.
+// This callback function might need some additional data, for example,
+// an array into which the callback stores the frames.
+// This additional data is called a "context", and the `Frametap` struct
+// is therefore a generic struct that takes a type parameter `TContext`.
+// Example:
+// `FrameTap([10]Frame)` is the type of a frametap struct
+// has an array to store the ten most recent frames of a capture.
+//
+// # Capturer
+//
+// The `Frametap` struct contains a `Capturer` as a member,
+// which is a wrapper for the internal APIs that we use to capture the screen.
+// The capturer object contains a pointer to  its parent `Frametap` object.
+// Whenever a frame is received, the capturer calls the parent's `onFrame`
+// function.
+//
+// The `Capturer` is more of an *interface*, than a struct.
+// Each OS will have its own implementation of `Capturer`.
+// Since Zig does not have interfaces, we use a struct with function pointers.
+// As an example, We use a `MacOSCapturer` struct on MacOS.
+// This struct is an "implementation" if the `Capturer` interface in the sense
+// that it has stores a `Capturer` with the appropriate function pointers
+// assigned.
+//
 
 pub const Rect = struct {
     x: f32,
@@ -17,9 +56,9 @@ pub const Rect = struct {
     height: f32,
 };
 
-const ScreenshotFn = *const (fn (*Capture, rect: ?Rect) anyerror!Frame);
-const StartRecordFn = *const (fn (*Capture) anyerror!void);
-const StopRecordFn = *const (fn (*Capture) anyerror!void);
+const ScreenshotFn = *const (fn (*ICapturer, rect: ?Rect) anyerror!Frame);
+const StartRecordFn = *const (fn (*ICapturer) anyerror!void);
+const StopRecordFn = *const (fn (*ICapturer) anyerror!void);
 
 pub const OpaqueFrameHandler = *const fn (*anyopaque, Frame) anyerror!void;
 
@@ -53,11 +92,14 @@ pub const Frame = struct {
     }
 };
 
-pub const Capture = struct {
+pub const ICapturer = struct {
     const Self = @This();
     rect: ?Rect,
+    /// A function pointer to a platform specific function that captures a screenshot.
     screenshotFn: ScreenshotFn,
+    /// A function pointer to a platform specific function that starts recording the screen.
     startRecordFn: StartRecordFn,
+    /// A function pointer to a platform specific function that stops recording the screen.
     stopRecordFn: StopRecordFn,
 
     // A callback function to call when a frame is received.
@@ -85,7 +127,7 @@ pub const Capture = struct {
         allocator: std.mem.Allocator,
         rect: ?Rect,
         frametap: *anyopaque,
-    ) !*Capture {
+    ) !*ICapturer {
         if (builtin.os.tag == .macos) {
             var macos_capture = try allocator.create(macos.MacOSScreenCapture);
             macos_capture.* = try macos.MacOSScreenCapture.init(
@@ -96,7 +138,7 @@ pub const Capture = struct {
             return &macos_capture.capture;
         }
 
-        return JifError.PlatformNotSupported;
+        return FrametapError.PlatformNotSupported;
     }
 
     pub fn destroy(self: *Self) void {
@@ -137,7 +179,7 @@ pub fn FrameTap(comptime TContext: type) type {
         pub const FrameHandler = *const fn (TContext, Frame) anyerror!void;
         const Self = @This();
 
-        capture: *Capture,
+        capture: *ICapturer,
         context: TContext,
         processFrame: FrameHandler,
 
@@ -159,7 +201,7 @@ pub fn FrameTap(comptime TContext: type) type {
 
         pub fn init(allocator: std.mem.Allocator, context: TContext) !*Self {
             const self = try allocator.create(Self);
-            const capture = try Capture.create(allocator, null, self);
+            const capture = try ICapturer.create(allocator, null, self);
             capture.setFrameHandler(&Self.onFrameCallback);
             self.* = Self{
                 .capture = capture,
@@ -176,7 +218,7 @@ pub fn FrameTap(comptime TContext: type) type {
     };
 }
 
-pub const JifError = error{
+pub const FrametapError = error{
     ImageCreationFailed,
     PlatformNotSupported,
     PNGConvertFailed,

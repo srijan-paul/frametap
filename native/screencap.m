@@ -117,8 +117,8 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   // If the user has provided a region to capture, capture only that area.
   if (sc->region != nil) {
     const CaptureRect *rect = sc->region;
-    const CGFloat bottom_left_y = rect->topleft_y + rect->height;
-    const CGFloat bottom_left_x = rect->topleft_x;
+    // const CGFloat bottom_left_y = rect->topleft_y + rect->height;
+    // const CGFloat bottom_left_x = rect->topleft_x;
     CGRect cg_rect =
         CGRectMake(rect->topleft_x, rect->topleft_y, rect->width, rect->height);
 
@@ -132,8 +132,8 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
 
   sc->processor = [[OutputProcessor alloc] init:sc
                                 onFrameReceived:sc->frame_processor];
-  NSError *err;
-  bool ok = [sc->stream addStreamOutput:sc->processor
+  NSError *err = nil;
+  bool const ok = [sc->stream addStreamOutput:sc->processor
                                    type:SCStreamOutputTypeScreen
                      sampleHandlerQueue:nil
                                   error:&err];
@@ -144,7 +144,6 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   }
 
   sc->capture_done = dispatch_semaphore_create(0);
-
   return true;
 }
 

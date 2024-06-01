@@ -2,37 +2,40 @@ pub const core = @import("core.zig");
 const std = @import("std");
 const gif = @import("gif.zig");
 
+const FrameTap = core.FrameTap(*std.ArrayList([]const u8));
+fn onFrame(frames: *std.ArrayList([]const u8), frame: core.Frame) !void {
+    try frames.append(frame.data);
+}
+
+fn captureFrames(frametap: *FrameTap) !void {
+    try frametap.capture.begin();
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    const FrameTap = core.FrameTap(?*anyopaque);
-    var frametap = try FrameTap.init(allocator, null);
+    var frames = std.ArrayList([]const u8).init(allocator);
+    var frametap = try FrameTap.init(allocator, &frames);
+    defer {
+        frametap.deinit();
+        for (frames.items) |frame| {
+            allocator.free(frame);
+        }
+        frames.deinit();
+    }
+    frametap.onFrame(onFrame);
 
-    const area = core.Rect{
-        .x = 0,
-        .y = 0,
-        .width = 1000,
-        .height = 1000,
-    };
+    _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
+    std.time.sleep(3 * std.time.ns_per_s);
 
-    const frame = try frametap.capture.screenshot(area);
-    try frame.writePng("screenshot.png");
-
-    // defer {
-    //     frametap.deinit();
-    //     for (frames.items) |frame| {
-    //         allocator.free(frame.data);
-    //     }
-    //     frames.deinit();
-    // }
-
-    // try gif.bgraFrames2Gif(
-    //     allocator,
-    //     ctx.frames.items,
-    //     std.time.ms_per_s * 4,
-    //     @intCast(ctx.width),
-    //     @intCast(ctx.height),
-    //     "out.gif",
-    // );
+    try frametap.capture.end();
+    try gif.bgraFrames2Gif(
+        allocator,
+        frames.items,
+        std.time.ms_per_s * 4,
+        1920,
+        1080,
+        "out.gif",
+    );
 }

@@ -4,8 +4,8 @@ const objc = @import("objc");
 const core = @import("core.zig");
 const screencap = @cImport(@cInclude("screencap.h"));
 
-const JifError = core.JifError;
-const Capturer = core.Capture;
+const CaptureError = core.FrametapError;
+const Capturer = core.ICapturer;
 const Rect = core.Rect;
 const CaptureConfig = core.CaptureConfig;
 const Platform = core.Platform;
@@ -13,13 +13,16 @@ const Platform = core.Platform;
 pub const MacOSScreenCapture = struct {
     const Self = @This();
     allocator: std.mem.Allocator,
-    capture: core.Capture,
+    capture: core.ICapturer,
 
     capture_c: *screencap.ScreenCapture,
+
+    /// Pointer to the user-facing `frametap` struct that contains the user provided
+    /// `onFrame` callback.
     frametap: *anyopaque,
 
     /// MacOS specific screenshot implementation.
-    fn screenshot(ctx: *core.Capture, rect: ?Rect) !core.Frame {
+    fn screenshot(ctx: *core.ICapturer, rect: ?Rect) !core.Frame {
         const self = @fieldParentPtr(Self, "capture", ctx);
 
         var c_frame: screencap.Frame = undefined;
@@ -48,6 +51,7 @@ pub const MacOSScreenCapture = struct {
         };
     }
 
+    /// The callback that runs everytime a frame is received on MacOS.
     export fn processCFrame(
         data: [*c]u8,
         width: usize,
@@ -58,13 +62,15 @@ pub const MacOSScreenCapture = struct {
         std.debug.assert(maybe_capture_ptr != null);
         std.debug.assert(bytes_per_row == width * 4);
 
+        // The capture object is passed back to us as an opaque pointer from C.
         const capture_ptr = maybe_capture_ptr orelse unreachable;
         const capture: *Capturer = @ptrCast(@alignCast(capture_ptr));
 
+        // From the cpature object, we can get a `self` pointer to this struct.
         const self = @fieldParentPtr(Self, "capture", capture);
         const framebuf = self.allocator.alloc(u8, bytes_per_row * height) catch return;
-
         @memcpy(framebuf, @as([*]u8, data));
+
         const frame = core.Frame{
             .width = width,
             .height = height,
@@ -74,7 +80,7 @@ pub const MacOSScreenCapture = struct {
         capture.onFrameReceived(self.frametap, frame) catch return;
     }
 
-    /// MacOS specific screen capture implementation
+    /// MacOS specific screen capture function.
     fn startCaptureMacOS(ctx: *Capturer) !void {
         const self = @fieldParentPtr(Self, "capture", ctx);
         var frame_processor: screencap.FrameProcessor = undefined;
@@ -92,14 +98,14 @@ pub const MacOSScreenCapture = struct {
         _ = screencap.stop_capture(self.capture_c);
     }
 
-    /// Initialize a MacOS specific capture context.
+    /// Initialize a MacOS specific capturer.
     pub fn init(
         allocator: std.mem.Allocator,
         rect: ?Rect,
         frametap: *anyopaque,
-    ) JifError!MacOSScreenCapture {
+    ) CaptureError!MacOSScreenCapture {
         const maybe_capture_c: ?*screencap.ScreenCapture = screencap.alloc_capture();
-        const capture_c = if (maybe_capture_c) |ptr| ptr else return JifError.InternalError;
+        const capture_c = if (maybe_capture_c) |ptr| ptr else return CaptureError.InternalError;
 
         const conf = core.CaptureConfig{
             .rect = rect,

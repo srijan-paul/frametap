@@ -25,7 +25,7 @@ pub const QuantizeResult = struct {
 };
 
 // The color array maps a color index to a "Color" object that contains:
-// 1. The RGB value of the color and its frequency in the original image.
+// the RGB value of the color and its frequency in the original image.
 // We use 5 bits per color channel, so we can represent 32 levels of each color.
 const color_array_size = 32768; // (2 ^ 5) ^ 3
 
