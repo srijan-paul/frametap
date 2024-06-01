@@ -35,7 +35,7 @@
 
   // Lock the base address of the pixel buffer
   CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-
+	
   uint8_t *baseAddress = (uint8_t *)CVPixelBufferGetBaseAddress(pixelBuffer);
   size_t const bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
   size_t const width = CVPixelBufferGetWidth(pixelBuffer);
@@ -56,9 +56,9 @@
   }
 
   uint8_t *outputBuf = malloc(outWidth * outHeight * 4);
-  for (size_t i = y; i < outHeight; i++) {
-    for (size_t j = x; j < outWidth; j++) {
-      size_t const inIdx = (i * width + j) * 4;
+  for (size_t i = 0; i < outHeight; i++) {
+    for (size_t j = 0; j < outWidth; j++) {
+      size_t const inIdx = ((i + y) * width + (j + x)) * 4;
       size_t const outIdx = (i * outWidth + j) * 4;
       outputBuf[outIdx] = baseAddress[inIdx];
       outputBuf[outIdx + 1] = baseAddress[inIdx + 1];

@@ -97,7 +97,7 @@ pub fn quantizeRgbaFrame(
 pub fn bgraFrames2Gif(
     allocator: std.mem.Allocator,
     frames: []const []const u8,
-    _: usize,
+    time_per_frame: u16,
     width: usize,
     height: usize,
     path: [:0]const u8,
@@ -105,8 +105,6 @@ pub fn bgraFrames2Gif(
     const n_pixels = width * height;
     const rgb_buf = try allocator.alloc(u8, width * height * 3);
     defer allocator.free(rgb_buf);
-
-    const time_per_frame: u16 = 2;
 
     var gif_config: cgif.CGIF_Config = undefined;
     initGifConfig(&gif_config, path, width, height);
@@ -137,7 +135,7 @@ pub fn bgraFrames2Gif(
         }
 
         // quantize the RGB buffer
-        const quantized = try quant.quantizeGiflib(allocator, rgb_buf);
+        const quantized = try quant.quantize(allocator, rgb_buf);
         defer quantized.deinit(allocator);
 
         frame_config.pImageData = quantized.image_buffer.ptr;
