@@ -435,7 +435,6 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         defer allocator.free(sorted_colors);
         // Now the colors in the partition are sorted along the widest channel.
         partition_to_split.colors = sorted_colors[0];
-
         // Create a new partition. We will populate this struct below.
         const new_partition = try allocator.create(ColorSpace);
 

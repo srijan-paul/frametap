@@ -4,7 +4,7 @@ const gif = @import("gif.zig");
 
 const FrameTap = core.FrameTap(*std.ArrayList([]const u8));
 fn onFrame(frames: *std.ArrayList([]const u8), frame: core.Frame) !void {
-    try frames.append(frame.data);
+    try frames.append(frame.image.data);
 }
 
 fn captureFrames(frametap: *FrameTap) !void {

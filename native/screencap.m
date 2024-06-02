@@ -1,6 +1,9 @@
 #import "screencap.h"
 #import "types.h"
+#include <CoreMedia/CoreMedia.h>
 #include <ScreenCaptureKit/ScreenCaptureKit.h>
+
+void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
 
 @implementation OutputProcessor
 
@@ -35,7 +38,7 @@
 
   // Lock the base address of the pixel buffer
   CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-	
+
   uint8_t *baseAddress = (uint8_t *)CVPixelBufferGetBaseAddress(pixelBuffer);
   size_t const bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
   size_t const width = CVPixelBufferGetWidth(pixelBuffer);
@@ -69,11 +72,17 @@
 
   // If the user provided a callback function to process the frame, call it.
   if (self.sc->has_frame_processor) {
-    self.sc->frame_processor.process_fn(
-        outputBuf, outWidth, outHeight, outWidth * 4,
-        self.frame_processor.other_data
-    );
+    ImageData image = {
+        .rgba_buf = outputBuf,
+        .width = outWidth,
+        .height = outHeight,
+    };
+    CMTime timeOfCapture = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+    add_frame(self.sc, timeOfCapture, image);
   }
+
+	free(outputBuf);
+
   // Unlock the pixel buffer
   CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
 }
@@ -96,6 +105,25 @@ void init_capture(ScreenCapture *sc) {
   sc->processor = nil;
   sc->filter = nil;
   sc->capture_done = dispatch_semaphore_create(0);
+  sc->capture_time = kCMTimeZero;
+}
+
+void add_frame(ScreenCapture *sc, CMTime time, ImageData image) {
+  // In the first call to `add_frame`, capture_time is kCMTimeZero.
+  // For all subsequent calls, it will be the time at which the previous frame
+  // was captured. So we can calculate the duration of the current frame by
+  // subtracting `sc->capture_time` from `time`.
+  if (CMTimeCompare(sc->capture_time, kCMTimeZero) != 0) {
+    CMTime duration = CMTimeSubtract(time, sc->capture_time);
+    Frame frame = {
+        .image = sc->current_frame_image,
+        .duration_in_ms = CMTimeGetSeconds(duration) * 1000,
+    };
+    sc->frame_processor.process_fn(frame, sc->frame_processor.other_data);
+  }
+
+  sc->capture_time = time;
+  sc->current_frame_image = image;
 }
 
 void set_on_frame_handler(ScreenCapture *sc, FrameProcessor processor) {
@@ -261,7 +289,7 @@ void stop_capture(ScreenCapture *sc) {
   dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
 }
 
-Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
+ImageData grab_screen(ScreenCapture *sc, const CaptureRect *rect) {
   // Determine capture bounds
   CGRect captureBounds;
   if (rect == NULL) {
@@ -293,7 +321,7 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   // Intuition says that bytes per row = width in pixels * bytes per pixel.
   // This isn't always true, however.
   // Sometimes, bytesPerRow =/= width * bytesPerPixel.
-  // This is because the OS might add padding bytes to each row.
+  // This is because the macOS might add padding bytes to each row.
   size_t const expectedBytesPerRow = width * bytesPerPixel;
   size_t const paddingPerRow = bytesPerRow - (width * bytesPerPixel);
   size_t const bufferLength = (bytesPerRow - paddingPerRow) * height;
@@ -329,9 +357,8 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
 
   // Now, bitmapData contains the image in RGBA format
   // Construct the Frame object
-  Frame frame;
+  ImageData frame;
   frame.rgba_buf = outputBuf;
-  frame.rgba_buf_size = bufferLength;
   frame.width = width;
   frame.height = height;
 
@@ -342,18 +369,38 @@ Frame capture_frame(ScreenCapture *sc, const CaptureRect *rect) {
   return frame;
 }
 
-void deinit_frame(Frame *frame) {
-  if (frame == nil)
+void deinit_imagedata(ImageData *frame) {
+  if (frame == nil) {
     return;
+  }
 
   if (frame->rgba_buf != nil) {
     free(frame->rgba_buf);
   }
 
   frame->rgba_buf = nil;
-  frame->rgba_buf_size = 0;
-  frame->width = 0;
-  frame->height = 0;
+}
+
+void deinit_frame(Frame *frame) {
+  if (frame->image.rgba_buf != nil) {
+    free(frame->image.rgba_buf);
+  }
+}
+
+void free_frame(Frame **frame_p) {
+  if (frame_p == nil)
+    return;
+
+  Frame *frame = *frame_p;
+  if (frame == nil)
+    return;
+
+  if (frame->image.rgba_buf != nil) {
+    free(frame->image.rgba_buf);
+  }
+
+  free(frame);
+  *frame_p = nil;
 }
 
 // not much to do on MacOS with ARC enabled :)
@@ -361,6 +408,7 @@ void deinit_capture(ScreenCapture *sc) {
   if (sc == nil) {
     return;
   }
+
   if (sc->region != nil) {
     free(sc->region);
   }

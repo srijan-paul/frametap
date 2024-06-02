@@ -26,4 +26,9 @@ struct ScreenCapture {
   bool should_stop_capture;
   FrameProcessor frame_processor;
   bool has_frame_processor;
+
+  // The time at which the most recent frame is captured.
+  CMTime capture_time;
+  // Image info for the most recently captured frame.
+  ImageData current_frame_image;
 };

@@ -22,10 +22,10 @@ pub const MacOSScreenCapture = struct {
     frametap: *anyopaque,
 
     /// MacOS specific screenshot implementation.
-    fn screenshot(ctx: *core.ICapturer, rect: ?Rect) !core.Frame {
+    fn screenshot(ctx: *core.ICapturer, rect: ?Rect) !core.ImageData {
         const self = @fieldParentPtr(Self, "capture", ctx);
 
-        var c_frame: screencap.Frame = undefined;
+        var image: screencap.ImageData = undefined;
         if (rect) |r| {
             const capture_rect = screencap.CaptureRect{
                 .topleft_x = r.x,
@@ -33,34 +33,33 @@ pub const MacOSScreenCapture = struct {
                 .width = r.width,
                 .height = r.height,
             };
-            c_frame = screencap.capture_frame(self.capture_c, &capture_rect);
+            image = screencap.grab_screen(self.capture_c, &capture_rect);
         } else {
-            c_frame = screencap.capture_frame(self.capture_c, null);
+            image = screencap.grab_screen(self.capture_c, null);
         }
 
-        defer screencap.deinit_frame(&c_frame);
+        defer screencap.deinit_imagedata(&image);
 
-        const framebuf = try self.allocator.alloc(u8, c_frame.rgba_buf_size);
-        const c_buf: [*]u8 = c_frame.rgba_buf;
+        const bufsize: usize = image.width * image.height * 4;
+        const framebuf = try self.allocator.alloc(u8, bufsize);
+        const c_buf: [*]u8 = image.rgba_buf;
 
         @memcpy(framebuf, c_buf);
-        return core.Frame{
-            .width = c_frame.width,
-            .height = c_frame.height,
+        return core.ImageData{
+            .width = image.width,
+            .height = image.height,
             .data = framebuf,
         };
     }
 
     /// The callback that runs everytime a frame is received on MacOS.
     export fn processCFrame(
-        data: [*c]u8,
-        width: usize,
-        height: usize,
-        bytes_per_row: usize,
+        cframe: screencap.Frame,
         maybe_capture_ptr: ?*anyopaque,
     ) void {
         std.debug.assert(maybe_capture_ptr != null);
-        std.debug.assert(bytes_per_row == width * 4);
+        const width = cframe.image.width;
+        const height = cframe.image.height;
 
         // The capture object is passed back to us as an opaque pointer from C.
         const capture_ptr = maybe_capture_ptr orelse unreachable;
@@ -68,13 +67,18 @@ pub const MacOSScreenCapture = struct {
 
         // From the cpature object, we can get a `self` pointer to this struct.
         const self = @fieldParentPtr(Self, "capture", capture);
-        const framebuf = self.allocator.alloc(u8, bytes_per_row * height) catch return;
-        @memcpy(framebuf, @as([*]u8, data));
+        const framebuf = self.allocator.alloc(u8, width * height * 4) catch return;
+        @memcpy(framebuf, @as([*]u8, cframe.image.rgba_buf));
 
-        const frame = core.Frame{
+        const image = core.ImageData{
             .width = width,
             .height = height,
             .data = framebuf,
+        };
+
+        const frame = core.Frame{
+            .image = image,
+            .duration_ms = cframe.duration_in_ms,
         };
 
         capture.onFrameReceived(self.frametap, frame) catch return;

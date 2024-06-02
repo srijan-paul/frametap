@@ -56,7 +56,7 @@ pub const Rect = struct {
     height: f32,
 };
 
-const ScreenshotFn = *const (fn (*ICapturer, rect: ?Rect) anyerror!Frame);
+const ScreenshotFn = *const (fn (*ICapturer, rect: ?Rect) anyerror!ImageData);
 const StartRecordFn = *const (fn (*ICapturer) anyerror!void);
 const StopRecordFn = *const (fn (*ICapturer) anyerror!void);
 
@@ -76,8 +76,8 @@ fn defaultFrameHandler(_: *anyopaque, _: Frame) !void {
     std.debug.panic("No frame handler set. Call 'setFrameHandler'\n", .{});
 }
 
-/// A single frame of a video.
-pub const Frame = struct {
+/// An RGBA Image buffer.
+pub const ImageData = struct {
     /// An buffer containing the frame info as RGBARBGARGBA...
     /// `data.len = width * height * 4`.
     data: []u8,
@@ -87,9 +87,15 @@ pub const Frame = struct {
     height: usize,
 
     /// Export the frame as a PNG file.
-    pub fn writePng(self: *const Frame, filepath: [:0]const u8) !void {
+    pub fn writePng(self: *const ImageData, filepath: [:0]const u8) !void {
         try png.writeRgbaToPng(self.data, self.width, self.height, filepath);
     }
+};
+
+/// A single frame of a video feed.
+pub const Frame = struct {
+    image: ImageData,
+    duration_ms: f64,
 };
 
 pub const ICapturer = struct {
@@ -159,7 +165,7 @@ pub const ICapturer = struct {
     /// Capture a screenshot of the screen.
     /// If `rect` is `null`, the rect area specified while initializing the capture object will be used.
     /// If that is `null` too, the entire screen will be captured.
-    pub fn screenshot(self: *Self, rect: ?Rect) !Frame {
+    pub fn screenshot(self: *Self, rect: ?Rect) !ImageData {
         // verify alginment.
         std.debug.assert((@intFromPtr(self) % @alignOf(Self)) == 0);
         return self.screenshotFn(self, rect);

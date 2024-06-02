@@ -10,20 +10,38 @@
 typedef struct {
   /**
    * Color data for a single frame for the frame in RGBA format.
+   * This buffer is (width * height * 4) bytes long.
    */
   uint8_t *rgba_buf;
-  /**
-   * Size of the `rgba_buf` buffer. Always equal to width * height
-   */
-  size_t rgba_buf_size;
+  // Width of the in pixels.
   size_t width;
+  // Height in pixels.
   size_t height;
-} Frame;
+} ImageData;
 
 /**
  * Destroy a frame.
  */
+void deinit_imagedata(ImageData *frame);
+
+/**
+ * A frame in video format.
+ */
+typedef struct {
+  ImageData image;
+  float duration_in_ms;
+} Frame;
+
+/**
+ * De-initialize a new frame.
+ * Releases all internally held references in the frame.
+ */
 void deinit_frame(Frame *frame);
+
+/**
+ * Dellocate a frame.  The frame pointer will be set to NULL.
+ */
+void free_frame(Frame **frame);
 
 // Represents a screen region to be captured.
 typedef struct CaptureRect {
@@ -36,10 +54,7 @@ typedef struct CaptureRect {
 typedef struct ScreenCapture ScreenCapture;
 
 // A callback function to process a captured frame.
-typedef void (*ProcessFrameFn)(
-    uint8_t *base_addr, size_t width, size_t height, size_t bytes_per_row,
-    void *other_data
-);
+typedef void (*ProcessFrameFn)(Frame frame, void *other_data);
 
 // A frame processor function along with any context it may need.
 typedef struct FrameProcessor {
@@ -90,7 +105,7 @@ void stop_capture(ScreenCapture *capture);
 /**
  * Get an RGBA buffer from the current screen contents.
  */
-Frame capture_frame(ScreenCapture *capture, const CaptureRect *rect);
+ImageData grab_screen(ScreenCapture *capture, const CaptureRect *rect);
 
 /**
  * free any resources associated with the ScreenCapture object.
