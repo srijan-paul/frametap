@@ -251,53 +251,6 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     return QuantizeResult.init(color_table, image_buf);
 }
 
-pub fn quantizeGiflib(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
-    const npixels = rgb_buf.len / 3;
-    const imgbuf = try allocator.alloc(u8, npixels);
-
-    var red = try allocator.alloc(u8, npixels);
-    var green = try allocator.alloc(u8, npixels);
-    var blue = try allocator.alloc(u8, npixels);
-
-    defer {
-        allocator.free(red);
-        allocator.free(green);
-        allocator.free(blue);
-    }
-
-    for (0..npixels) |i| {
-        red[i] = rgb_buf[i * 3];
-        green[i] = rgb_buf[i * 3 + 1];
-        blue[i] = rgb_buf[i * 3 + 2];
-    }
-
-    var colormapsize: c_int = 256;
-    const output_colormap = try allocator.alloc(giflib.GifColorType, 256);
-    defer allocator.free(output_colormap);
-
-    if (giflib.GifQuantizeBuffer(
-        1920,
-        1080,
-        &colormapsize,
-        red.ptr,
-        green.ptr,
-        blue.ptr,
-        imgbuf.ptr,
-        output_colormap.ptr,
-    ) != giflib.GIF_OK) {
-        unreachable;
-    }
-
-    var color_table = try allocator.alloc(u8, 256 * 3);
-    for (0.., output_colormap) |i, color| {
-        color_table[i * 3] = color.Red;
-        color_table[i * 3 + 1] = color.Green;
-        color_table[i * 3 + 2] = color.Blue;
-    }
-
-    return QuantizeResult.init(color_table, imgbuf);
-}
-
 /// Find the color channel with the largest range in the given parition.
 /// Mutates `rgb_min`, `rgb_max`, `rgb_width`, and `widest_channel`.
 fn findWidestChannel(partition: *ColorSpace) void {

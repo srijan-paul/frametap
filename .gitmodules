@@ -4,6 +4,4 @@
 [submodule "vendor/cgif"]
 	path = vendor/cgif
 	url = https://github.com/dloebl/cgif
-[submodule "vendor/giflib"]
-	path = vendor/giflib
-	url = https://github.com/mirrorer/giflib
+

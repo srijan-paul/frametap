@@ -3,6 +3,7 @@ const objc = @import("objc");
 const c = @cImport(@cInclude("CoreGraphics/CoreGraphics.h"));
 const macos = @import("./mac-os.zig");
 const png = @import("./png.zig");
+const builtin = @import("builtin");
 
 // The mental model of the capture system is as follows:
 //
@@ -69,8 +70,6 @@ pub const CaptureConfig = struct {
     stopRecordFn: StopRecordFn,
     onFrameReceived: ?OpaqueFrameHandler,
 };
-
-const builtin = @import("builtin");
 
 fn defaultFrameHandler(_: *anyopaque, _: Frame) !void {
     std.debug.panic("No frame handler set. Call 'setFrameHandler'\n", .{});

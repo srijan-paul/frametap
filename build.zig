@@ -43,29 +43,14 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(std.Build.LazyPath.relative("native"));
     exe.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
 
+    // Link the `lodepng` library. Used to encode frames to PNG (if needed).
     exe.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
     exe.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
 
-    exe.linkLibC();
-
+    // Add the "CGIF" library. Used for GIF encoding.
     exe.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
-    exe.addIncludePath(std.Build.LazyPath.relative("vendor/giflib/lib"));
-
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/dgif_lib.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/egif_lib.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_err.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_font.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gif_hash.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/gifalloc.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/quantize.o"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/giflib/lib/openbsd-reallocarray.o"));
-
-    exe.addCSourceFile(.{
-        .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c"),
-    });
-    exe.addCSourceFile(.{
-        .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c"),
-    });
+    exe.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
+    exe.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
 
     exe.linkLibC();
 
