@@ -3,8 +3,10 @@
 
 const std = @import("std");
 const cgif = @cImport(@cInclude("cgif.h"));
-const FrametapError = @import("./core.zig").FrametapError;
+const core = @import("./core.zig");
 const quant = @import("./quantize.zig");
+
+const FrametapError = core.FrametapError;
 
 /// Intialize a cgif gif config struct.
 fn initGifConfig(
@@ -28,7 +30,7 @@ fn initGifConfig(
 }
 
 /// Intialize a cgif frame config struct.
-fn initFrameConfig(conf: *cgif.CGIF_FrameConfig, delay: u16) void {
+fn initFrameConfig(conf: *cgif.CGIF_FrameConfig) void {
     conf.pLocalPalette = null;
     conf.pImageData = null;
 
@@ -37,7 +39,7 @@ fn initFrameConfig(conf: *cgif.CGIF_FrameConfig, delay: u16) void {
     conf.genFlags = 0;
     conf.transIndex = 0;
 
-    conf.delay = delay;
+    conf.delay = 0;
 }
 
 pub fn applyQuantization(
@@ -96,8 +98,7 @@ pub fn quantizeRgbaFrame(
 /// convert a sequence of BGRA frames to a gif file.
 pub fn bgraFrames2Gif(
     allocator: std.mem.Allocator,
-    frames: []const []const u8,
-    time_per_frame: u16,
+    frames: []core.Frame,
     width: usize,
     height: usize,
     path: [:0]const u8,
@@ -111,7 +112,7 @@ pub fn bgraFrames2Gif(
     gif_config.attrFlags = cgif.CGIF_ATTR_NO_GLOBAL_TABLE | cgif.CGIF_ATTR_IS_ANIMATED;
 
     var frame_config: cgif.CGIF_FrameConfig = undefined;
-    initFrameConfig(&frame_config, time_per_frame);
+    initFrameConfig(&frame_config);
     frame_config.attrFlags = cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE;
 
     var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
@@ -120,14 +121,15 @@ pub fn bgraFrames2Gif(
     gif = gif; // suppress non-const warning. cgif needs this to be non-const.
 
     for (frames) |frame| {
+        const bgra_buf = frame.image.data;
         // convert BGRA buffer to RGB
         for (0..n_pixels) |i| {
             const src_base = i * 4;
             const dst_base = i * 3;
 
-            const b = frame[src_base];
-            const g = frame[src_base + 1];
-            const r = frame[src_base + 2];
+            const b = bgra_buf[src_base];
+            const g = bgra_buf[src_base + 1];
+            const r = bgra_buf[src_base + 2];
 
             rgb_buf[dst_base] = r;
             rgb_buf[dst_base + 1] = g;
@@ -138,6 +140,8 @@ pub fn bgraFrames2Gif(
         const quantized = try quant.quantize(allocator, rgb_buf);
         defer quantized.deinit(allocator);
 
+        const duration_ms: f32 = @floatCast(frame.duration_ms / 10.0); // CGIF uses unit of 0.1s for frame delay.
+        frame_config.delay = @intFromFloat(duration_ms);
         frame_config.pImageData = quantized.image_buffer.ptr;
         frame_config.pLocalPalette = quantized.color_table.ptr;
         frame_config.numLocalPaletteEntries = @intCast(quantized.color_table.len / 3);
