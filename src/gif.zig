@@ -114,6 +114,7 @@ pub fn bgraFrames2Gif(
     var frame_config: cgif.CGIF_FrameConfig = undefined;
     initFrameConfig(&frame_config);
     frame_config.attrFlags = cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE;
+    frame_config.genFlags = cgif.CGIF_FRAME_GEN_USE_TRANSPARENCY | cgif.CGIF_FRAME_GEN_USE_DIFF_WINDOW;
 
     var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
         return FrametapError.GifConvertFailed;
@@ -140,8 +141,11 @@ pub fn bgraFrames2Gif(
         const quantized = try quant.quantize(allocator, rgb_buf);
         defer quantized.deinit(allocator);
 
-        const duration_ms: f32 = @floatCast(frame.duration_ms / 10.0); // CGIF uses unit of 0.1s for frame delay.
-        frame_config.delay = @intFromFloat(duration_ms);
+        // CGIF uses units of 0.01s for frame delay.
+        const duration = frame.duration_ms / 10.0;
+        const duration_int: u64 = @intFromFloat(@round(duration));
+
+        frame_config.delay = @truncate(duration_int);
         frame_config.pImageData = quantized.image_buffer.ptr;
         frame_config.pLocalPalette = quantized.color_table.ptr;
         frame_config.numLocalPaletteEntries = @intCast(quantized.color_table.len / 3);

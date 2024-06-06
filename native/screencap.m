@@ -32,6 +32,8 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
 
   CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
   if (pixelBuffer == NULL) {
+		// NSLog(@"Dropped frame");
+		CFRelease(sampleBuffer);
     // dropped frames!? why does this happen.
     return;
   }
@@ -63,10 +65,7 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
     for (size_t j = 0; j < outWidth; j++) {
       size_t const inIdx = ((i + y) * width + (j + x)) * 4;
       size_t const outIdx = (i * outWidth + j) * 4;
-      outputBuf[outIdx] = baseAddress[inIdx];
-      outputBuf[outIdx + 1] = baseAddress[inIdx + 1];
-      outputBuf[outIdx + 2] = baseAddress[inIdx + 2];
-      outputBuf[outIdx + 3] = baseAddress[inIdx + 3];
+			memcpy(outputBuf + outIdx, baseAddress + inIdx, 4);
     }
   }
 
@@ -85,6 +84,7 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
 
   // Unlock the pixel buffer
   CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+	CFRelease(sampleBuffer);
 }
 @end
 
@@ -164,7 +164,7 @@ bool setup_screen_capture(ScreenCapture *sc, SCShareableContent *content) {
   [sc->conf setPixelFormat:'BGRA'];
   [sc->conf setCapturesAudio:NO];
   [sc->conf setShowsCursor:YES];
-  [sc->conf setMinimumFrameInterval:kCMTimeZero];
+  [sc->conf setMinimumFrameInterval:CMTimeMake(1, 60)];
 
   // If the user has provided a region to capture, capture only that area.
   if (sc->region != nil) {

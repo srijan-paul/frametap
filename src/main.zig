@@ -17,9 +17,9 @@ pub fn main() !void {
 
     var frames = std.ArrayList(core.Frame).init(allocator);
     var frametap = try FrameTap.init(allocator, &frames, core.Rect{
-        .x = 271,
-        .y = 192,
-        .width = 1000,
+        .x = 0,
+        .y = 51,
+        .width = 500,
         .height = 500,
     });
     defer {
@@ -38,7 +38,7 @@ pub fn main() !void {
     try gif.bgraFrames2Gif(
         allocator,
         frames.items,
-        1000,
+        500,
         500,
         "out.gif",
     );
