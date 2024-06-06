@@ -26,10 +26,38 @@ pub const QuantizeResult = struct {
     }
 };
 
+pub const QuantizedFrames = struct {
+    const Self = @This();
+    /// RGBRGBRGB... * 256
+    color_table: []u8,
+    /// A list of frames where each frame is a
+    /// list of indices into the color table.
+    frames: [][]u8,
+
+    /// The allocator used to allocate the color table and the frames.
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, table: []u8, frames: [][]u8) !Self {
+        return Self{
+            .allocator = allocator,
+            .color_table = table,
+            .frames = frames,
+        };
+    }
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.color_table);
+        for (self.frames) |frame| {
+            self.allocator.free(frame);
+        }
+        self.allocator.free(self.frames);
+    }
+};
+
 // The color array maps a color index to a "Color" object that contains:
 // the RGB value of the color and its frequency in the original image.
 // We use 5 bits per color channel, so we can represent 32 levels of each color.
-const color_array_size = 32768; // (2 ^ 5) ^ 3
+const color_array_size: comptime_int = 32768; // (2 ^ 5) ^ 3
 
 const QuantizedColor = struct {
     /// RGB color value.
@@ -130,13 +158,75 @@ const RGB5 = struct {
     }
 };
 
-pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
+/// Quantize a list of raw BGRA frames such that all frames share the same global color table.
+pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []const u8) !QuantizedFrames {
+    // Initialize the color array table with all possible colors in the R5G5B5 space.
+    var all_colors: [color_array_size]QuantizedColor = undefined;
+
+    for (0.., &all_colors) |i, *color| {
+        color.frequency = 0;
+        color.new_index = 0;
+        // The RGB values are packed in the lower 15 bits of its index
+        // 0x--(RRRRR)(GGGGG)(BBBBB)
+        color.RGB[0] = @truncate(i >> (2 * bits_per_prim_color)); // R: upper 5 bits
+        color.RGB[1] = @truncate((i >> bits_per_prim_color) & max_prim_color); // G: middle 5 bits
+        color.RGB[2] = @truncate(i & max_prim_color); // B: lower 5 bits.
+    }
+
+    // 1. Prepare a frequency histogram of all colors in the image.
+    for (bgra_bufs) |buf| {
+        const npixels = buf.len / 4;
+        for (0..npixels) |i| {
+            const base = i * 4;
+            const b = buf[base];
+            const g = buf[base + 1];
+            const r = buf[base + 2];
+
+            const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
+            const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
+            const b_mask = @as(usize, b >> shift);
+
+            const index = r_mask | g_mask | b_mask;
+            all_colors[index].frequency += 1;
+        }
+    }
+
+    // 2. Quantize the histogram to 256 colors.
+    const total_px_count = bgra_bufs.len * bgra_bufs[0].len / 4;
+    const color_table = try quantizeHistogram(allocator, &all_colors, total_px_count);
+    const nframes = bgra_bufs.len;
+    const quantized_frames = try allocator.alloc([]u8, nframes);
+    for (0..nframes) |i| {
+        const frame = bgra_bufs[i];
+        const npixels = frame.len / 4;
+        const quantized_frame = try allocator.alloc(u8, npixels);
+
+        for (0..npixels) |j| {
+            const b = frame[j * 4];
+            const g = frame[j * 4 + 1];
+            const r = frame[j * 4 + 2];
+
+            const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
+            const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
+            const b_mask = @as(usize, b >> shift);
+            const index: usize = r_mask | g_mask | b_mask;
+            quantized_frame[j] = @truncate(index);
+        }
+
+        quantized_frames[i] = quantized_frame;
+    }
+
+    return QuantizedFrames.init(allocator, color_table, quantized_frames);
+}
+
+/// Given a buffer of RGB pixels, quantize the colors in the image to 256 colors.
+pub fn quantizeRgbImage(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
     const n_pixels = rgb_buf.len / 3;
     std.debug.assert(rgb_buf.len % 3 == 0);
 
-    // Initiale the color array table with all possible colors in the R5G5B5 space.
-    const all_colors = try allocator.alloc(QuantizedColor, color_array_size);
-    for (0.., all_colors) |i, *color| {
+    // Initialize the color array table with all possible colors in the R5G5B5 space.
+    var all_colors: [color_array_size]QuantizedColor = undefined;
+    for (0.., &all_colors) |i, *color| {
         color.frequency = 0;
         color.new_index = 0;
         // The RGB values are packed in the lower 15 bits of its index
@@ -162,6 +252,33 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
         all_colors[index].frequency += 1;
     }
 
+    const color_table = try quantizeHistogram(allocator, &all_colors, n_pixels);
+
+    // Now go over the input image, and replace each pixel with the index of the partition
+    var image_buf = try allocator.alloc(u8, n_pixels);
+    for (0..n_pixels) |i| {
+        const r = rgb_buf[i * 3];
+        const g = rgb_buf[i * 3 + 1];
+        const b = rgb_buf[i * 3 + 2];
+
+        const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
+        const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
+        const b_mask = @as(usize, b >> shift);
+        const index: usize = r_mask | g_mask | b_mask;
+
+        image_buf[i] = all_colors[index].new_index;
+    }
+
+    return QuantizeResult.init(color_table, image_buf);
+}
+
+/// Given a list of colors with their respective frequencies,
+/// produce a color table with 256 colors that best represent the histogram.
+fn quantizeHistogram(
+    allocator: std.mem.Allocator,
+    all_colors: *[color_array_size]QuantizedColor,
+    n_pixels: usize,
+) ![]u8 {
     // Find all colors in the color table that are used at least once, and chain them.
     var head: *QuantizedColor = undefined;
     for (all_colors) |*color| {
@@ -233,22 +350,7 @@ pub fn quantize(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
         color_table[i * 3 + 2] = @intCast((rgb_sum[2] << shift) / partition.num_colors);
     }
 
-    // Now go over the input image, and replace each pixel with the index of the partition
-    var image_buf = try allocator.alloc(u8, n_pixels);
-    for (0..n_pixels) |i| {
-        const r = rgb_buf[i * 3];
-        const g = rgb_buf[i * 3 + 1];
-        const b = rgb_buf[i * 3 + 2];
-
-        const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
-        const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
-        const b_mask = @as(usize, b >> shift);
-        const index: usize = r_mask | g_mask | b_mask;
-
-        image_buf[i] = all_colors[index].new_index;
-    }
-
-    return QuantizeResult.init(color_table, image_buf);
+    return color_table;
 }
 
 /// Find the color channel with the largest range in the given parition.

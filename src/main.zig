@@ -32,14 +32,12 @@ pub fn main() !void {
     frametap.onFrame(onFrame);
 
     _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
-    std.time.sleep(5 * std.time.ns_per_s);
+    std.time.sleep(2 * std.time.ns_per_s);
 
     try frametap.capture.end();
-    try gif.bgraFrames2Gif(
-        allocator,
-        frames.items,
-        500,
-        500,
-        "out.gif",
-    );
+    try gif.encodeGif(allocator, .{
+        .frames = frames.items,
+        .path = "out.gif",
+        .use_global_palette = false,
+    });
 }
