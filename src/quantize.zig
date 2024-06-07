@@ -9,6 +9,8 @@ const giflib = @cImport(@cInclude("gif_lib.h"));
 //
 // Used this as reference: https://github.com/mirrorer/giflib/blob/master/lib/quantize.c
 
+/// A single RGB image represented as a list of indices
+/// into a color table.
 pub const QuantizeResult = struct {
     const Self = @This();
     /// RGBRGBRGB...
@@ -26,6 +28,8 @@ pub const QuantizeResult = struct {
     }
 };
 
+/// A list of frames that are represented as arrays of indices into
+/// a common global color table.
 pub const QuantizedFrames = struct {
     const Self = @This();
     /// RGBRGBRGB... * 256
@@ -173,7 +177,7 @@ pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []con
         color.RGB[2] = @truncate(i & max_prim_color); // B: lower 5 bits.
     }
 
-    // 1. Prepare a frequency histogram of all colors in the image.
+    // 1. Prepare a frequency histogram of all colors in the clip.
     for (bgra_bufs) |buf| {
         const npixels = buf.len / 4;
         for (0..npixels) |i| {
@@ -194,23 +198,24 @@ pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []con
     // 2. Quantize the histogram to 256 colors.
     const total_px_count = bgra_bufs.len * bgra_bufs[0].len / 4;
     const color_table = try quantizeHistogram(allocator, &all_colors, total_px_count);
-    const nframes = bgra_bufs.len;
-    const quantized_frames = try allocator.alloc([]u8, nframes);
-    for (0..nframes) |i| {
-        const frame = bgra_bufs[i];
-        const npixels = frame.len / 4;
+
+    // 3. Go over each frame in the input, and replace every pixel with an index into
+    // the color table.
+    const quantized_frames = try allocator.alloc([]u8, bgra_bufs.len);
+    for (0.., bgra_bufs) |i, bgra_frame| {
+        const npixels = bgra_frame.len / 4;
         const quantized_frame = try allocator.alloc(u8, npixels);
 
         for (0..npixels) |j| {
-            const b = frame[j * 4];
-            const g = frame[j * 4 + 1];
-            const r = frame[j * 4 + 2];
+            const b = bgra_frame[j * 4];
+            const g = bgra_frame[j * 4 + 1];
+            const r = bgra_frame[j * 4 + 2];
 
             const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
             const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
             const b_mask = @as(usize, b >> shift);
             const index: usize = r_mask | g_mask | b_mask;
-            quantized_frame[j] = @truncate(index);
+            quantized_frame[j] = all_colors[index].new_index;
         }
 
         quantized_frames[i] = quantized_frame;

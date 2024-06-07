@@ -22,6 +22,7 @@ pub fn main() !void {
         .width = 500,
         .height = 500,
     });
+
     defer {
         frametap.deinit();
         for (frames.items) |frame| {
@@ -32,12 +33,12 @@ pub fn main() !void {
     frametap.onFrame(onFrame);
 
     _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
-    std.time.sleep(2 * std.time.ns_per_s);
+    std.time.sleep(5 * std.time.ns_per_s);
 
     try frametap.capture.end();
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
         .path = "out.gif",
-        .use_global_palette = false,
+        .use_global_palette = true,
     });
 }

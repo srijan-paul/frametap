@@ -113,7 +113,6 @@ pub const GifEncoderSettings = struct {
 fn encodeGifWithGlobalPalette(
     allocator: std.mem.Allocator,
     frames: []core.Frame,
-    gif: *cgif.CGIF,
     gif_config: *cgif.CGIF_Config,
     frame_config: *cgif.CGIF_FrameConfig,
 ) !void {
@@ -131,19 +130,22 @@ fn encodeGifWithGlobalPalette(
 
     gif_config.pGlobalPalette = quantized.color_table.ptr;
     gif_config.numGlobalPaletteEntries = @truncate(quantized.color_table.len / 3);
-    std.debug.assert(gif_config.numGlobalPaletteEntries == 256);
+
+    var gif: *cgif.CGIF = cgif.cgif_newgif(gif_config) orelse {
+        return FrametapError.GifConvertFailed;
+    };
+    gif = gif; // suppress incorrect warning from ZLS in my IDE.
 
     for (0.., frames) |i, *frame| {
         const qframe = quantized.frames[i];
         frame_config.pImageData = qframe.ptr;
 
+        // CGIF uses units of 0.01s for frame duration.
         const duration = frame.duration_ms / 10.0;
         const duration_int: u64 = @intFromFloat(@round(duration));
         frame_config.delay = @truncate(duration_int);
 
-        const r = cgif.cgif_addframe(gif, frame_config);
-        if (r != 0) {
-            std.debug.print("Error: {}\n", .{r});
+        if (cgif.cgif_addframe(gif, frame_config) != 0) {
             return FrametapError.GifConvertFailed;
         }
     }
@@ -160,9 +162,14 @@ fn encodeGifWithGlobalPalette(
 fn encodeGifWithLocalPalette(
     allocator: std.mem.Allocator,
     frames: []core.Frame,
-    gif: *cgif.CGIF,
+    gif_config: *cgif.CGIF_Config,
     frame_config: *cgif.CGIF_FrameConfig,
 ) !void {
+    var gif: *cgif.CGIF = cgif.cgif_newgif(gif_config) orelse {
+        return FrametapError.GifConvertFailed;
+    };
+    gif = gif; // suppress incorrect warning from ZLS in my IDE.
+
     const width = frames[0].image.width;
     const height = frames[0].image.height;
 
@@ -228,17 +235,11 @@ pub fn encodeGif(allocator: std.mem.Allocator, config: GifEncoderSettings) !void
     initFrameConfig(&frame_config);
     frame_config.genFlags = cgif.CGIF_FRAME_GEN_USE_TRANSPARENCY | cgif.CGIF_FRAME_GEN_USE_DIFF_WINDOW;
 
-    var gif: *cgif.CGIF = cgif.cgif_newgif(&gif_config) orelse {
-        return FrametapError.GifConvertFailed;
-    };
-
-    gif = gif; // supress bad zls error in my IDE :(
-
     if (config.use_global_palette) {
-        try encodeGifWithGlobalPalette(allocator, frames, gif, &gif_config, &frame_config);
+        try encodeGifWithGlobalPalette(allocator, frames, &gif_config, &frame_config);
     } else {
         gif_config.attrFlags |= @intCast(cgif.CGIF_ATTR_NO_GLOBAL_TABLE);
         frame_config.attrFlags |= @intCast(cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE);
-        try encodeGifWithLocalPalette(allocator, frames, gif, &frame_config);
+        try encodeGifWithLocalPalette(allocator, frames, &gif_config, &frame_config);
     }
 }
