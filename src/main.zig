@@ -19,8 +19,8 @@ pub fn main() !void {
     var frametap = try FrameTap.init(allocator, &frames, core.Rect{
         .x = 0,
         .y = 51,
-        .width = 500,
-        .height = 500,
+        .width = 324,
+        .height = 524,
     });
 
     defer {
@@ -33,7 +33,7 @@ pub fn main() !void {
     frametap.onFrame(onFrame);
 
     _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
-    std.time.sleep(1 * std.time.ns_per_s);
+    std.time.sleep(2.5 * std.time.ns_per_s);
 
     try frametap.capture.end();
     try gif.encodeGif(allocator, .{

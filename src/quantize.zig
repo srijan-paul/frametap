@@ -151,16 +151,6 @@ const bits_per_prim_color = 5; // 5 bits per color channel.
 const max_prim_color = 0b11111;
 const shift = 8 - bits_per_prim_color;
 
-const RGB5 = struct {
-    b: u5,
-    g: u5,
-    r: u5,
-    _: std.builtin.Type.Int(@sizeOf(usize) - 3 * @sizeOf(u5)),
-    comptime {
-        std.debug.assert(@sizeOf(RGB5) == @sizeOf(usize));
-    }
-};
-
 /// Convert an RGB color to an index in the global color array table
 /// which contains all colors in the R5G5B5 space.
 pub inline fn rgbToGlobalIndex(r: usize, g: usize, b: usize) usize {
@@ -175,6 +165,7 @@ pub fn quantizeBgraFrames(
     allocator: std.mem.Allocator,
     bgra_bufs: []const []const u8,
     width: usize,
+    height: usize,
     use_dithering: bool,
 ) !QuantizedFrames {
     // Initialize the color array table with all possible colors in the R5G5B5 space.
@@ -230,6 +221,7 @@ pub fn quantizeBgraFrames(
                 bgra_frame,
                 .{ .quantized_buf = quantized_frame, .color_table = color_table },
                 width,
+                height,
                 &all_colors,
             );
         }
@@ -245,6 +237,7 @@ pub fn quantizeBgraImage(
     allocator: std.mem.Allocator,
     image: []u8,
     width: usize,
+    height: usize,
     use_dithering: bool,
 ) !QuantizedImage {
     const n_pixels = image.len / 4;
@@ -301,6 +294,7 @@ pub fn quantizeBgraImage(
             image,
             .{ .quantized_buf = image_buf, .color_table = color_table },
             width,
+            height,
             &all_colors,
         );
     }
@@ -396,8 +390,8 @@ fn findWidestChannel(partition: *ColorSpace) void {
         std.debug.assert(color != null);
         const color_ptr = if (color) |c| c else unreachable;
         for (0..3) |i| {
-            min[i] = @min(color_ptr.RGB[i], min[i]);
-            max[i] = @max(color_ptr.RGB[i], max[i]);
+            min[i] = @min(color_ptr.RGB[i] << 3, min[i]);
+            max[i] = @max(color_ptr.RGB[i] << 3, max[i]);
         }
         color = color_ptr.next;
     }
@@ -424,14 +418,14 @@ fn findWidestChannel(partition: *ColorSpace) void {
 
 test "findWidestChannel" {
     var yellow = QuantizedColor{
-        .RGB = [3]u8{ 255, 255, 0 },
+        .RGB = [3]u8{ 25, 24, 0 },
         .frequency = 0,
         .new_index = 0,
         .next = null,
     };
 
     var purple = QuantizedColor{
-        .RGB = [3]u8{ 250, 0, 250 },
+        .RGB = [3]u8{ 25, 0, 25 },
         .frequency = 0,
         .new_index = 0,
         .next = &yellow,
@@ -447,9 +441,9 @@ test "findWidestChannel" {
         .num_pixels = 0,
     };
     findWidestChannel(&colorspace);
-    try std.testing.expect(std.mem.eql(i32, &colorspace.rgb_min, &[3]i32{ 250, 0, 0 }));
-    try std.testing.expect(std.mem.eql(i32, &colorspace.rgb_max, &[3]i32{ 255, 255, 250 }));
-    try std.testing.expectEqual(.Green, colorspace.widest_channel);
+    try std.testing.expect(std.mem.eql(i32, &colorspace.rgb_min, &[3]i32{ 25 << 3, 0, 0 }));
+    try std.testing.expect(std.mem.eql(i32, &colorspace.rgb_max, &[3]i32{ 25 << 3, 24 << 3, 25 << 3 }));
+    try std.testing.expectEqual(.Blue, colorspace.widest_channel);
 }
 
 /// Copy all the colors in a partition into an array,

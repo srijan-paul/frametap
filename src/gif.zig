@@ -131,6 +131,7 @@ fn encodeGifWithGlobalPalette(
         allocator,
         raw_frames,
         frames[0].image.width,
+        frames[0].image.height,
         settings.use_dithering,
     );
     defer quantized.deinit();
@@ -181,12 +182,14 @@ fn encodeGifWithLocalPalette(
     gif = gif; // suppress incorrect warning from ZLS in my IDE.
 
     const width = frames[0].image.width;
+    const height = frames[0].image.height;
     for (frames) |*frame| {
         // quantize the RGB buffer
         const quantized = try quant.quantizeBgraImage(
             allocator,
             frame.image.data,
             width,
+            height,
             settings.use_dithering,
         );
         defer quantized.deinit(allocator);
