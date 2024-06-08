@@ -19,6 +19,30 @@ const floyd_steinberg = [_]ErrDiffusion{
     .{ .offset = .{ 1, 1 }, .factor = 1.0 / 16.0 },
 };
 
+pub fn findClosestColor(
+    color_table: []const u8,
+    r: i32,
+    g: i32,
+    b: i32,
+) usize {
+    var min_distance: i32 = std.math.maxInt(i32);
+    var closest_index: usize = 0;
+
+    for (0..color_table.len / 3) |i| {
+        const r_diff = r - color_table[i * 3 + 0];
+        const g_diff = g - color_table[i * 3 + 1];
+        const b_diff = b - color_table[i * 3 + 2];
+
+        const distance = r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
+        if (distance < min_distance) {
+            min_distance = distance;
+            closest_index = i;
+        }
+    }
+
+    return closest_index;
+}
+
 pub fn ditherBgraImage(
     allocator: std.mem.Allocator,
     image: []const u8,
@@ -27,6 +51,7 @@ pub fn ditherBgraImage(
     height: usize,
     all_colors: *const [quantize.color_array_size]QuantizedColor,
 ) !void {
+    _ = all_colors;
     // create a copy of the image to avoid modifying the original.
     const bgra = try allocator.alloc(u8, image.len);
     defer allocator.free(bgra);
@@ -39,13 +64,13 @@ pub fn ditherBgraImage(
         for (0..width) |col| {
             const i = row * width + col;
             // 1. replace the pixel with the closest color.
-            const global_color_index = quantize.rgbToGlobalIndex(
+            const indx = findClosestColor(
+                quantized.color_table,
                 bgra[i * 4 + 2], // r
                 bgra[i * 4 + 1], // g
                 bgra[i * 4 + 0], // b
             );
-            const newindex = all_colors[global_color_index].new_index;
-            quantized_buf[i] = newindex;
+            quantized_buf[i] = @truncate(indx);
 
             // 2. Find the quantization error for this pixel.
             const err = quantizationError(bgra, &quantized, i);

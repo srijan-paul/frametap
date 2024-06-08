@@ -63,12 +63,14 @@ pub const QuantizedFrames = struct {
 pub const color_array_size: comptime_int = 32768; // (2 ^ 5) ^ 3
 
 pub const QuantizedColor = struct {
-    /// RGB color value.
+    /// RGB color values reduced to 5 bit space.
+    /// R = RGB[0] << 3.
     RGB: [3]u8,
     /// Frequency of the color in the original image.
     frequency: usize,
-    /// Index into the color-space partitions array.
-    new_index: u8,
+    /// Index into color table. Will point to the closest RGB value present
+    /// in a color table with at most 256 entries.
+    index_in_color_table: u8,
     /// Next color in the linked list.
     next: ?*QuantizedColor,
 };
@@ -126,7 +128,7 @@ fn colorFromRGB(r: u8, g: u8, b: u8) QuantizedColor {
     return QuantizedColor{
         .RGB = [3]u8{ r, g, b },
         .frequency = 0,
-        .new_index = 0,
+        .index_in_color_table = 0,
         .next = null,
     };
 }
@@ -151,13 +153,18 @@ const bits_per_prim_color = 5; // 5 bits per color channel.
 const max_prim_color = 0b11111;
 const shift = 8 - bits_per_prim_color;
 
-/// Convert an RGB color to an index in the global color array table
-/// which contains all colors in the R5G5B5 space.
-pub inline fn rgbToGlobalIndex(r: usize, g: usize, b: usize) usize {
+/// Given an 8-bit RGB color,
+/// returns a pointer to the nearest matching color present in the global color array.
+pub inline fn getGlobalColor(
+    all_colors: *[color_array_size]QuantizedColor,
+    r: usize,
+    g: usize,
+    b: usize,
+) *QuantizedColor {
     const r_mask = (r >> shift) << (2 * bits_per_prim_color);
     const g_mask = (g >> shift) << bits_per_prim_color;
     const b_mask = b >> shift;
-    return r_mask | g_mask | b_mask;
+    return &all_colors[r_mask | g_mask | b_mask];
 }
 
 /// Quantize a list of raw BGRA frames such that all frames share the same global color table.
@@ -173,7 +180,7 @@ pub fn quantizeBgraFrames(
 
     for (0.., &all_colors) |i, *color| {
         color.frequency = 0;
-        color.new_index = 0;
+        color.index_in_color_table = 0;
         // The RGB values are packed in the lower 15 bits of its index
         // 0x--(RRRRR)(GGGGG)(BBBBB)
         color.RGB[0] = @truncate(i >> (2 * bits_per_prim_color)); // R: upper 5 bits
@@ -190,8 +197,8 @@ pub fn quantizeBgraFrames(
             const g = buf[base + 1];
             const r = buf[base + 2];
 
-            const index = rgbToGlobalIndex(r, g, b);
-            all_colors[index].frequency += 1;
+            const color = getGlobalColor(&all_colors, r, g, b);
+            color.frequency += 1;
         }
     }
 
@@ -211,8 +218,8 @@ pub fn quantizeBgraFrames(
             const g = bgra_frame[j * 4 + 1];
             const r = bgra_frame[j * 4 + 2];
 
-            const index = rgbToGlobalIndex(r, g, b);
-            quantized_frame[j] = all_colors[index].new_index;
+            const color = getGlobalColor(&all_colors, r, g, b);
+            quantized_frame[j] = color.index_in_color_table;
         }
 
         if (use_dithering) {
@@ -247,7 +254,7 @@ pub fn quantizeBgraImage(
     var all_colors: [color_array_size]QuantizedColor = undefined;
     for (0.., &all_colors) |i, *color| {
         color.frequency = 0;
-        color.new_index = 0;
+        color.index_in_color_table = 0;
         // The RGB values are packed in the lower 15 bits of its index
         // 0x--(RRRRR)(GGGGG)(BBBBB)
         color.RGB[0] = @truncate(i >> (2 * bits_per_prim_color)); // R: upper 5 bits
@@ -285,7 +292,7 @@ pub fn quantizeBgraImage(
         const b_mask = @as(usize, b >> shift);
         const index: usize = r_mask | g_mask | b_mask;
 
-        image_buf[i] = all_colors[index].new_index;
+        image_buf[i] = all_colors[index].index_in_color_table;
     }
 
     if (use_dithering) {
@@ -357,7 +364,7 @@ fn quantizeHistogram(
         var color = partition.colors;
         var rgb_sum: [3]usize = .{ 0, 0, 0 };
         for (0..partition.num_colors) |j| {
-            color.new_index = @truncate(i);
+            color.index_in_color_table = @truncate(i);
 
             rgb_sum[0] += color.RGB[0];
             rgb_sum[1] += color.RGB[1];
@@ -420,14 +427,14 @@ test "findWidestChannel" {
     var yellow = QuantizedColor{
         .RGB = [3]u8{ 25, 24, 0 },
         .frequency = 0,
-        .new_index = 0,
+        .index_in_color_table = 0,
         .next = null,
     };
 
     var purple = QuantizedColor{
         .RGB = [3]u8{ 25, 0, 25 },
         .frequency = 0,
-        .new_index = 0,
+        .index_in_color_table = 0,
         .next = &yellow,
     };
 
