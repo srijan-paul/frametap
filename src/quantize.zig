@@ -1,6 +1,5 @@
 const std = @import("std");
-const core = @import("core");
-const giflib = @cImport(@cInclude("gif_lib.h"));
+const dither = @import("dither.zig");
 
 // Implements the color quantization algorithm described here:
 // https://dl.acm.org/doi/pdf/10.1145/965145.801294
@@ -11,7 +10,7 @@ const giflib = @cImport(@cInclude("gif_lib.h"));
 
 /// A single RGB image represented as a list of indices
 /// into a color table.
-pub const QuantizeResult = struct {
+pub const QuantizedImage = struct {
     const Self = @This();
     /// RGBRGBRGB...
     color_table: []u8,
@@ -61,9 +60,9 @@ pub const QuantizedFrames = struct {
 // The color array maps a color index to a "Color" object that contains:
 // the RGB value of the color and its frequency in the original image.
 // We use 5 bits per color channel, so we can represent 32 levels of each color.
-const color_array_size: comptime_int = 32768; // (2 ^ 5) ^ 3
+pub const color_array_size: comptime_int = 32768; // (2 ^ 5) ^ 3
 
-const QuantizedColor = struct {
+pub const QuantizedColor = struct {
     /// RGB color value.
     RGB: [3]u8,
     /// Frequency of the color in the original image.
@@ -162,8 +161,22 @@ const RGB5 = struct {
     }
 };
 
+/// Convert an RGB color to an index in the global color array table
+/// which contains all colors in the R5G5B5 space.
+pub inline fn rgbToGlobalIndex(r: usize, g: usize, b: usize) usize {
+    const r_mask = (r >> shift) << (2 * bits_per_prim_color);
+    const g_mask = (g >> shift) << bits_per_prim_color;
+    const b_mask = b >> shift;
+    return r_mask | g_mask | b_mask;
+}
+
 /// Quantize a list of raw BGRA frames such that all frames share the same global color table.
-pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []const u8) !QuantizedFrames {
+pub fn quantizeBgraFrames(
+    allocator: std.mem.Allocator,
+    bgra_bufs: []const []const u8,
+    width: usize,
+    use_dithering: bool,
+) !QuantizedFrames {
     // Initialize the color array table with all possible colors in the R5G5B5 space.
     var all_colors: [color_array_size]QuantizedColor = undefined;
 
@@ -186,11 +199,7 @@ pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []con
             const g = buf[base + 1];
             const r = buf[base + 2];
 
-            const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
-            const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
-            const b_mask = @as(usize, b >> shift);
-
-            const index = r_mask | g_mask | b_mask;
+            const index = rgbToGlobalIndex(r, g, b);
             all_colors[index].frequency += 1;
         }
     }
@@ -211,11 +220,18 @@ pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []con
             const g = bgra_frame[j * 4 + 1];
             const r = bgra_frame[j * 4 + 2];
 
-            const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
-            const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
-            const b_mask = @as(usize, b >> shift);
-            const index: usize = r_mask | g_mask | b_mask;
+            const index = rgbToGlobalIndex(r, g, b);
             quantized_frame[j] = all_colors[index].new_index;
+        }
+
+        if (use_dithering) {
+            try dither.ditherBgraImage(
+                allocator,
+                bgra_frame,
+                .{ .quantized_buf = quantized_frame, .color_table = color_table },
+                width,
+                &all_colors,
+            );
         }
 
         quantized_frames[i] = quantized_frame;
@@ -225,9 +241,14 @@ pub fn quantizeBgraFrames(allocator: std.mem.Allocator, bgra_bufs: []const []con
 }
 
 /// Given a buffer of RGB pixels, quantize the colors in the image to 256 colors.
-pub fn quantizeRgbImage(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeResult {
-    const n_pixels = rgb_buf.len / 3;
-    std.debug.assert(rgb_buf.len % 3 == 0);
+pub fn quantizeBgraImage(
+    allocator: std.mem.Allocator,
+    image: []u8,
+    width: usize,
+    use_dithering: bool,
+) !QuantizedImage {
+    const n_pixels = image.len / 4;
+    std.debug.assert(image.len % 4 == 0);
 
     // Initialize the color array table with all possible colors in the R5G5B5 space.
     var all_colors: [color_array_size]QuantizedColor = undefined;
@@ -243,11 +264,11 @@ pub fn quantizeRgbImage(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeRe
 
     // Sample all colors in the image, and count their frequency.
     for (0..n_pixels) |i| {
-        const base = i * 3;
+        const base = i * 4;
 
-        const r = rgb_buf[base];
-        const g = rgb_buf[base + 1];
-        const b = rgb_buf[base + 2];
+        const b = image[base];
+        const g = image[base + 1];
+        const r = image[base + 2];
 
         const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
         const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
@@ -262,9 +283,9 @@ pub fn quantizeRgbImage(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeRe
     // Now go over the input image, and replace each pixel with the index of the partition
     var image_buf = try allocator.alloc(u8, n_pixels);
     for (0..n_pixels) |i| {
-        const r = rgb_buf[i * 3];
-        const g = rgb_buf[i * 3 + 1];
-        const b = rgb_buf[i * 3 + 2];
+        const b = image[i * 4];
+        const g = image[i * 4 + 1];
+        const r = image[i * 4 + 2];
 
         const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
         const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
@@ -274,7 +295,17 @@ pub fn quantizeRgbImage(allocator: std.mem.Allocator, rgb_buf: []u8) !QuantizeRe
         image_buf[i] = all_colors[index].new_index;
     }
 
-    return QuantizeResult.init(color_table, image_buf);
+    if (use_dithering) {
+        try dither.ditherBgraImage(
+            allocator,
+            image,
+            .{ .quantized_buf = image_buf, .color_table = color_table },
+            width,
+            &all_colors,
+        );
+    }
+
+    return QuantizedImage.init(color_table, image_buf);
 }
 
 /// Given a list of colors with their respective frequencies,
@@ -313,11 +344,7 @@ fn quantizeHistogram(
 
     findWidestChannel(first_partition);
 
-    const partitions = try medianCut(
-        allocator,
-        first_partition,
-        8,
-    );
+    const partitions = try medianCut(allocator, first_partition, 8);
 
     defer {
         for (partitions) |p| {
@@ -461,17 +488,14 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
 /// find the partition that varies the most in RGB width, and return its index.
 fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
     var max_size: i32 = 0;
-    var split_index: usize = 0;
-    var found = false;
+    var split_index: ?usize = null;
     for (0..partitions.len) |i| {
         const partition = partitions[i];
         if (partition.rgb_width > max_size and partition.num_colors > 1) {
             max_size = partition.rgb_width;
             split_index = i;
-            found = true;
         }
     }
-    if (!found) return null;
     return split_index;
 }
 
@@ -499,9 +523,9 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         const new_partition = try allocator.create(ColorSpace);
 
         // Next, we find the *median* color in the sorted list of colors.
-        // NOTE: The median is NOT the middle element.
-        // Rather, its the element that divides the array such that both halves
-        // have roughly the same pixel-frequency.
+        // NOTE: The median is NOT the middle element, since we're not sorting by frequency.
+        // We want the color that divides the partitions such that both halves
+        // contribute roughly the same pixel-frequency.
         // AKA sum([color.frequency for color in left]) =  sum(color.frequency for color in right).
         var color = partition_to_split.colors;
 
@@ -531,10 +555,6 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // At this point, `color` is the last color in the left partition.
         const last_of_left = color;
         const first_of_right = if (last_of_left.next) |c| c else unreachable;
-
-        // const sort_axis = @intFromEnum(partition_to_split.widest_channel);
-        // const max_color = last_of_left.RGB[sort_axis] << shift;
-        // const min_color = first_of_right.RGB[sort_axis] << shift;
 
         // Set up the new partition (right half).
         new_partition.colors = first_of_right;

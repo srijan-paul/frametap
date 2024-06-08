@@ -33,12 +33,20 @@ pub fn main() !void {
     frametap.onFrame(onFrame);
 
     _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
-    std.time.sleep(5 * std.time.ns_per_s);
+    std.time.sleep(1 * std.time.ns_per_s);
 
     try frametap.capture.end();
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
-        .path = "out.gif",
+        .path = "dither.gif",
         .use_global_palette = true,
+        .use_dithering = true,
+    });
+
+    try gif.encodeGif(allocator, .{
+        .frames = frames.items,
+        .path = "no_dither.gif",
+        .use_global_palette = true,
+        .use_dithering = false,
     });
 }

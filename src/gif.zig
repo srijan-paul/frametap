@@ -46,7 +46,7 @@ pub fn applyQuantization(
     allocator: std.mem.Allocator,
     width: usize,
     height: usize,
-    quantized: quant.QuantizeResult,
+    quantized: quant.QuantizedImage,
 ) ![]const u8 {
     const n_pixels = width * height;
     var new_frame = try allocator.alloc(u8, n_pixels * 4);
@@ -104,6 +104,9 @@ pub const GifEncoderSettings = struct {
     /// When `true`, the encoder will use a single global color palette
     /// for all frames. Helps reduce file size.
     use_global_palette: bool = false,
+
+    /// If `true`, error diffusion dithering will be applied to each frame.
+    use_dithering: bool = true,
 };
 
 /// Encode a sequence of BGRA frames to a gif file using a global color palette.
@@ -115,6 +118,7 @@ fn encodeGifWithGlobalPalette(
     frames: []core.Frame,
     gif_config: *cgif.CGIF_Config,
     frame_config: *cgif.CGIF_FrameConfig,
+    settings: GifEncoderSettings,
 ) !void {
     var raw_frames = try allocator.alloc([]const u8, frames.len);
     defer allocator.free(raw_frames);
@@ -123,7 +127,12 @@ fn encodeGifWithGlobalPalette(
         raw_frames[i] = frame.image.data;
     }
 
-    const quantized = try quant.quantizeBgraFrames(allocator, raw_frames);
+    const quantized = try quant.quantizeBgraFrames(
+        allocator,
+        raw_frames,
+        frames[0].image.width,
+        settings.use_dithering,
+    );
     defer quantized.deinit();
 
     std.debug.assert(quantized.frames.len == frames.len);
@@ -164,6 +173,7 @@ fn encodeGifWithLocalPalette(
     frames: []core.Frame,
     gif_config: *cgif.CGIF_Config,
     frame_config: *cgif.CGIF_FrameConfig,
+    settings: GifEncoderSettings,
 ) !void {
     var gif: *cgif.CGIF = cgif.cgif_newgif(gif_config) orelse {
         return FrametapError.GifConvertFailed;
@@ -171,30 +181,14 @@ fn encodeGifWithLocalPalette(
     gif = gif; // suppress incorrect warning from ZLS in my IDE.
 
     const width = frames[0].image.width;
-    const height = frames[0].image.height;
-
-    const n_pixels = width * height;
-    const rgb_buf = try allocator.alloc(u8, n_pixels * 3);
-    defer allocator.free(rgb_buf);
-
     for (frames) |*frame| {
-        const bgra_buf = frame.image.data;
-        // convert BGRA buffer to RGB
-        for (0..n_pixels) |i| {
-            const src_base = i * 4;
-            const dst_base = i * 3;
-
-            const b = bgra_buf[src_base];
-            const g = bgra_buf[src_base + 1];
-            const r = bgra_buf[src_base + 2];
-
-            rgb_buf[dst_base] = r;
-            rgb_buf[dst_base + 1] = g;
-            rgb_buf[dst_base + 2] = b;
-        }
-
         // quantize the RGB buffer
-        const quantized = try quant.quantizeRgbImage(allocator, rgb_buf);
+        const quantized = try quant.quantizeBgraImage(
+            allocator,
+            frame.image.data,
+            width,
+            settings.use_dithering,
+        );
         defer quantized.deinit(allocator);
 
         // CGIF uses units of 0.01s for frame delay.
@@ -236,10 +230,22 @@ pub fn encodeGif(allocator: std.mem.Allocator, config: GifEncoderSettings) !void
     frame_config.genFlags = cgif.CGIF_FRAME_GEN_USE_TRANSPARENCY | cgif.CGIF_FRAME_GEN_USE_DIFF_WINDOW;
 
     if (config.use_global_palette) {
-        try encodeGifWithGlobalPalette(allocator, frames, &gif_config, &frame_config);
+        try encodeGifWithGlobalPalette(
+            allocator,
+            frames,
+            &gif_config,
+            &frame_config,
+            config,
+        );
     } else {
         gif_config.attrFlags |= @intCast(cgif.CGIF_ATTR_NO_GLOBAL_TABLE);
         frame_config.attrFlags |= @intCast(cgif.CGIF_FRAME_ATTR_USE_LOCAL_TABLE);
-        try encodeGifWithLocalPalette(allocator, frames, &gif_config, &frame_config);
+        try encodeGifWithLocalPalette(
+            allocator,
+            frames,
+            &gif_config,
+            &frame_config,
+            config,
+        );
     }
 }
