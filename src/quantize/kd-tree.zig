@@ -5,29 +5,38 @@ const BoundingBox = struct {
     max: [3]u8, // max RGB coords.
 };
 
-pub const KDTreeCutNode = struct {
+/// A non-leaf node in a KD Tree separates the 3-dimensional
+/// RGB space into two sub-spaces along a plain parallel one of the axes (R/G/B)
+/// that contains the `key` point.
+pub const KdNonLeafNode = struct {
     bounding_box: BoundingBox,
     cut_dim: usize, // 0 = r, 1 = g, 2 = b
     key: [3]u8, // the key that divides the plane in `cut_dim`.
-    left: ?*KDTreeNode, // left subtree
-    right: ?*KDTreeNode, // right subtree
+    left: ?*KdNode, // left subtree
+    right: ?*KdNode, // right subtree
 };
 
-/// A 3-dimensional KD-Tree that stores RGB colors.
-pub const KDTreeNode = union(enum) {
-    leaf: [3]u8, // RGB
-    non_leaf: KDTreeCutNode,
+pub const KdNode = union(enum) {
+    leaf: [3]u8, // R-G-B
+    non_leaf: KdNonLeafNode,
 };
 
 fn compareRgb(channel: usize, a: [3]u8, b: [3]u8) bool {
     return a[channel] < b[channel];
 }
 
+/// A 3-dimensional KD-Tree that stores colors in the RGB space.
 pub const KDTree = struct {
     const Self = @This();
 
-    root: KDTreeCutNode,
     allocator: std.mem.Allocator,
+
+    /// `depth` is the maximum distance between the root and any leaf.
+    /// Depth of the root is 0, and depth of a child is `1 + depth(parent)`.
+    depth: usize,
+
+    /// Root node if the KD Tree.
+    root: KdNonLeafNode,
 
     pub fn init(allocator: std.mem.Allocator, color_table: []const u8) !KDTree {
         std.debug.assert(color_table.len % 3 == 0);
@@ -54,21 +63,27 @@ pub const KDTree = struct {
 
         const bb = BoundingBox{ .min = bb_min, .max = bb_max };
 
-        const root = try constructKdTree(allocator, bb, colors);
+        const tree = try constructKdTree(allocator, bb, colors);
         return .{
-            .root = root,
+            .root = tree.root,
+            .depth = tree.depth,
             .allocator = allocator,
         };
+    }
+
+    pub fn findNearestColor(self: *const Self, color: [3]u8) [3]u8 {
+        _ = color;
+        _ = self;
     }
 
     fn constructKdTree(
         allocator: std.mem.Allocator,
         bounding_box: BoundingBox,
         colors: [][3]u8,
-    ) !KDTreeCutNode {
-        std.debug.assert(colors.len > 2);
+    ) !struct { root: KdNonLeafNode, depth: usize } {
+        std.debug.assert(colors.len > 4);
 
-        var root: KDTreeCutNode = undefined;
+        var root: KdNonLeafNode = undefined;
         root.cut_dim = 0; // red.
         root.bounding_box = bounding_box;
 
@@ -77,18 +92,22 @@ pub const KDTree = struct {
         const median = colors.len / 2;
         root.key = colors[median];
 
-        const left = try allocator.create(KDTreeNode);
-        left.* = try constructRecursive(allocator, &root, true, colors[0..median], 1);
+        var depth: usize = 1;
 
-        const right = try allocator.create(KDTreeNode);
-        right.* = try constructRecursive(allocator, &root, false, colors[median + 1 ..], 1);
+        const left = try allocator.create(KdNode);
+        left.* = try constructRecursive(allocator, &root, true, colors[0..median], 1, &depth);
+
+        const right = try allocator.create(KdNode);
+        right.* = try constructRecursive(allocator, &root, false, colors[median + 1 ..], 1, &depth);
 
         root.left = left;
         root.right = right;
-        return root;
+
+        return .{ .root = root, .depth = depth };
     }
 
-    inline fn makeChildBoundingBox(parent: *const KDTreeCutNode, is_left: bool) BoundingBox {
+    /// Constructs a bounding box for the child node from its parent's bounding box.
+    inline fn makeChildBoundingBox(parent: *const KdNonLeafNode, is_left: bool) BoundingBox {
         var bb = parent.bounding_box;
         if (is_left) {
             bb.max[parent.cut_dim] = parent.key[parent.cut_dim];
@@ -98,17 +117,26 @@ pub const KDTree = struct {
         return bb;
     }
 
+    /// Recursively constructs a KD Tree from a list of colors and a root node.
+    /// `parent_node`: Parent of the current node being constructed.
+    /// `is_left_child`: True if the current node is the left child of `parent_node`.
+    /// `colors`: List of colors to be partitioned by the current one.
+    /// `current_depth`: Depth of the current node.
+    /// `total_depth`: An in-out parameter that is updated with the depth of the tree.
     fn constructRecursive(
         allocator: std.mem.Allocator,
-        parent_node: *const KDTreeCutNode,
+        parent_node: *const KdNonLeafNode,
         is_left_child: bool,
         colors: [][3]u8,
-        depth: usize,
-    ) !KDTreeNode {
+        current_depth: usize,
+        total_depth: *usize,
+    ) !KdNode {
         std.debug.assert(colors.len > 1);
 
-        var node: KDTreeCutNode = undefined;
-        node.cut_dim = depth % 3;
+        total_depth.* = @max(total_depth.*, current_depth);
+
+        var node: KdNonLeafNode = undefined;
+        node.cut_dim = current_depth % 3;
         node.bounding_box = makeChildBoundingBox(parent_node, is_left_child);
 
         // sort all colors along the cut dimension.
@@ -121,11 +149,19 @@ pub const KDTree = struct {
         if (lower.len == 0) {
             node.left = null;
         } else {
-            var left = try allocator.create(KDTreeNode);
+            var left = try allocator.create(KdNode);
             if (lower.len == 1) {
+                total_depth.* = @max(total_depth.*, current_depth + 1);
                 left.leaf = lower[0];
             } else {
-                left.* = try constructRecursive(allocator, &node, true, lower, depth + 1);
+                left.* = try constructRecursive(
+                    allocator,
+                    &node,
+                    true,
+                    lower,
+                    current_depth + 1,
+                    total_depth,
+                );
             }
             node.left = left;
         }
@@ -133,16 +169,24 @@ pub const KDTree = struct {
         node.right = null;
         if (median + 1 < colors.len) {
             const higher = colors[median + 1 ..];
-            var right = try allocator.create(KDTreeNode);
+            var right = try allocator.create(KdNode);
             if (higher.len == 1) {
+                total_depth.* = @max(total_depth.*, current_depth + 1);
                 right.leaf = higher[0];
             } else {
-                right.* = try constructRecursive(allocator, &node, false, higher, depth + 1);
+                right.* = try constructRecursive(
+                    allocator,
+                    &node,
+                    false,
+                    higher,
+                    current_depth + 1,
+                    total_depth,
+                );
             }
             node.right = right;
         }
 
-        return KDTreeNode{ .non_leaf = node };
+        return KdNode{ .non_leaf = node };
     }
 
     pub fn deinit(self: *const Self) void {
@@ -155,7 +199,7 @@ pub const KDTree = struct {
         }
     }
 
-    fn destroyNode(self: *const Self, node: *KDTreeNode) void {
+    fn destroyNode(self: *const Self, node: *KdNode) void {
         switch (node.*) {
             .non_leaf => {
                 if (node.non_leaf.left) |left| {
@@ -174,7 +218,7 @@ pub const KDTree = struct {
 };
 
 const t = std.testing;
-test "KDTree – construction" {
+test "KDTree construction" {
     const allocator = t.allocator;
     const color_table = [_]u8{
         200, 0,   0,
@@ -188,6 +232,8 @@ test "KDTree – construction" {
 
     const tree = try KDTree.init(allocator, &color_table);
     defer tree.deinit();
+
+    try t.expectEqual(2, tree.depth);
 
     try t.expectEqual(0, tree.root.cut_dim);
     try t.expectEqualDeep([3]u8{ 80, 100, 0 }, tree.root.key);
