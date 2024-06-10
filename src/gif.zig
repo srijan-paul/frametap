@@ -4,7 +4,7 @@
 const std = @import("std");
 const cgif = @cImport(@cInclude("cgif.h"));
 const core = @import("./core.zig");
-const quant = @import("./quantize.zig");
+const quant = @import("./quantize/quantize.zig");
 
 const FrametapError = core.FrametapError;
 
@@ -132,6 +132,7 @@ fn encodeGifWithGlobalPalette(
         raw_frames,
         frames[0].image.width,
         frames[0].image.height,
+        quant.Quantize.median_cut,
         settings.use_dithering,
     );
     defer quantized.deinit();
@@ -190,6 +191,7 @@ fn encodeGifWithLocalPalette(
             frame.image.data,
             width,
             height,
+            quant.Quantize.median_cut,
             settings.use_dithering,
         );
         defer quantized.deinit(allocator);

@@ -1,5 +1,10 @@
 const std = @import("std");
-const dither = @import("dither.zig");
+const Dither = @import("dither.zig");
+
+const q = @import("quantize.zig");
+const QuantizedImage = q.QuantizedImage;
+const QuantizedFrames = q.QuantizedFrames;
+const QuantizerConfig = q.QuantizerConfig;
 
 // Implements the color quantization algorithm described here:
 // https://dl.acm.org/doi/pdf/10.1145/965145.801294
@@ -7,55 +12,6 @@ const dither = @import("dither.zig");
 // Paul Heckbert, Computer Graphics lab, New York Institute of Technology.
 //
 // Used this as reference: https://github.com/mirrorer/giflib/blob/master/lib/quantize.c
-
-/// A single RGB image represented as a list of indices
-/// into a color table.
-pub const QuantizedImage = struct {
-    const Self = @This();
-    /// RGBRGBRGB...
-    color_table: []u8,
-    /// indices into the color table
-    image_buffer: []u8,
-
-    pub fn init(color_table: []u8, image_buffer: []u8) Self {
-        return .{ .color_table = color_table, .image_buffer = image_buffer };
-    }
-
-    pub fn deinit(self: *const Self, allocator: std.mem.Allocator) void {
-        allocator.free(self.color_table);
-        allocator.free(self.image_buffer);
-    }
-};
-
-/// A list of frames that are represented as arrays of indices into
-/// a common global color table.
-pub const QuantizedFrames = struct {
-    const Self = @This();
-    /// RGBRGBRGB... * 256
-    color_table: []u8,
-    /// A list of frames where each frame is a
-    /// list of indices into the color table.
-    frames: [][]u8,
-
-    /// The allocator used to allocate the color table and the frames.
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, table: []u8, frames: [][]u8) !Self {
-        return Self{
-            .allocator = allocator,
-            .color_table = table,
-            .frames = frames,
-        };
-    }
-
-    pub fn deinit(self: *const Self) void {
-        self.allocator.free(self.color_table);
-        for (self.frames) |frame| {
-            self.allocator.free(frame);
-        }
-        self.allocator.free(self.frames);
-    }
-};
 
 // The color array maps a color index to a "Color" object that contains:
 // the RGB value of the color and its frequency in the original image.
@@ -168,13 +124,7 @@ pub inline fn getGlobalColor(
 }
 
 /// Quantize a list of raw BGRA frames such that all frames share the same global color table.
-pub fn quantizeBgraFrames(
-    allocator: std.mem.Allocator,
-    bgra_bufs: []const []const u8,
-    width: usize,
-    height: usize,
-    use_dithering: bool,
-) !QuantizedFrames {
+pub fn quantizeBgraFrames(config: QuantizerConfig, bgra_bufs: []const []const u8) !QuantizedFrames {
     // Initialize the color array table with all possible colors in the R5G5B5 space.
     var all_colors: [color_array_size]QuantizedColor = undefined;
 
@@ -202,6 +152,8 @@ pub fn quantizeBgraFrames(
         }
     }
 
+    const allocator = config.allocator;
+
     // 2. Quantize the histogram to 256 colors.
     const total_px_count = bgra_bufs.len * bgra_bufs[0].len / 4;
     const color_table = try quantizeHistogram(allocator, &all_colors, total_px_count);
@@ -209,6 +161,8 @@ pub fn quantizeBgraFrames(
     // 3. Go over each frame in the input, and replace every pixel with an index into
     // the color table.
     const quantized_frames = try allocator.alloc([]u8, bgra_bufs.len);
+    var ditherer = Dither.init(allocator, &all_colors, color_table);
+    defer ditherer.deinit();
     for (0.., bgra_bufs) |i, bgra_frame| {
         const npixels = bgra_frame.len / 4;
         const quantized_frame = try allocator.alloc(u8, npixels);
@@ -222,14 +176,12 @@ pub fn quantizeBgraFrames(
             quantized_frame[j] = color.index_in_color_table;
         }
 
-        if (use_dithering) {
-            try dither.ditherBgraImage(
-                allocator,
+        if (config.use_dithering) {
+            try ditherer.ditherBgraImage(
                 bgra_frame,
                 .{ .quantized_buf = quantized_frame, .color_table = color_table },
-                width,
-                height,
-                &all_colors,
+                config.width,
+                config.height,
             );
         }
 
@@ -240,13 +192,7 @@ pub fn quantizeBgraFrames(
 }
 
 /// Given a buffer of RGB pixels, quantize the colors in the image to 256 colors.
-pub fn quantizeBgraImage(
-    allocator: std.mem.Allocator,
-    image: []u8,
-    width: usize,
-    height: usize,
-    use_dithering: bool,
-) !QuantizedImage {
+pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedImage {
     const n_pixels = image.len / 4;
     std.debug.assert(image.len % 4 == 0);
 
@@ -278,6 +224,7 @@ pub fn quantizeBgraImage(
         all_colors[index].frequency += 1;
     }
 
+    const allocator = config.allocator;
     const color_table = try quantizeHistogram(allocator, &all_colors, n_pixels);
 
     // Now go over the input image, and replace each pixel with the index of the partition
@@ -295,14 +242,13 @@ pub fn quantizeBgraImage(
         image_buf[i] = all_colors[index].index_in_color_table;
     }
 
-    if (use_dithering) {
-        try dither.ditherBgraImage(
-            allocator,
+    if (config.use_dithering) {
+        var ditherer = Dither.init(allocator, &all_colors, color_table);
+        try ditherer.ditherBgraImage(
             image,
             .{ .quantized_buf = image_buf, .color_table = color_table },
-            width,
-            height,
-            &all_colors,
+            config.width,
+            config.height,
         );
     }
 

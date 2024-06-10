@@ -1,11 +1,53 @@
-const quantize = @import("quantize.zig");
+const quantize = @import("median-cut.zig");
+const q = @import("quantize.zig");
 const std = @import("std");
+
+const color_array_size = quantize.color_array_size;
 const QuantizedColor = quantize.QuantizedColor;
+
+const Self = @This();
+
+/// Helper struct for hashing a color.
+const ColorHasher = struct {
+    pub fn hash(_: ColorHasher, key: u32) u64 {
+        return key;
+    }
+
+    pub fn eql(_: ColorHasher, a: u32, b: u32) bool {
+        return a == b;
+    }
+};
 
 pub const QuantizedBuf = struct {
     color_table: []const u8,
     quantized_buf: []u8,
 };
+
+const ColorMap = std.hash_map.HashMap(u32, u8, ColorHasher, 80);
+
+allocator: std.mem.Allocator,
+all_colors: *[color_array_size]QuantizedColor,
+/// Maps the id of an RGB color to the nearest approximation we have in our color table.
+nearest_color_map: ColorMap,
+/// A contiguous array of colors (RGBRGBRGB...) that are present in the quantized image.
+color_table: []const u8,
+
+pub fn init(
+    allocator: std.mem.Allocator,
+    all_colors: *[color_array_size]QuantizedColor,
+    color_table: []const u8,
+) Self {
+    return Self{
+        .color_table = color_table,
+        .all_colors = all_colors,
+        .allocator = allocator,
+        .nearest_color_map = ColorMap.init(allocator),
+    };
+}
+
+pub fn deinit(self: *Self) void {
+    self.nearest_color_map.deinit();
+}
 
 const ErrDiffusion = struct {
     offset: [2]i64,
@@ -19,42 +61,50 @@ const floyd_steinberg = [_]ErrDiffusion{
     .{ .offset = .{ 1, 1 }, .factor = 1.0 / 16.0 },
 };
 
-pub fn findClosestColor(
-    color_table: []const u8,
-    r: i32,
-    g: i32,
-    b: i32,
-) usize {
+pub inline fn colorToKey(r: u32, b: u32, g: u32) u32 {
+    return (r << 16) | (g << 8) | b;
+}
+
+pub fn findClosestColor(self: *Self, r_u8: u8, g_u8: u8, b_u8: u8) !u8 {
+    const r: i32 = r_u8;
+    const g: i32 = g_u8;
+    const b: i32 = b_u8;
+
+    const color_id = colorToKey(r_u8, g_u8, b_u8);
+    if (self.nearest_color_map.get(color_id)) |cached_index| {
+        return cached_index;
+    }
+
     var min_distance: i32 = std.math.maxInt(i32);
     var closest_index: usize = 0;
 
+    const color_table = self.color_table;
     for (0..color_table.len / 3) |i| {
         const r_diff = r - color_table[i * 3 + 0];
         const g_diff = g - color_table[i * 3 + 1];
         const b_diff = b - color_table[i * 3 + 2];
 
-        const distance = r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
+        const distance: i32 = r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
         if (distance < min_distance) {
             min_distance = distance;
             closest_index = i;
         }
     }
 
-    return closest_index;
+    try self.nearest_color_map.put(color_id, @truncate(closest_index));
+    return @truncate(closest_index);
 }
 
 pub fn ditherBgraImage(
-    allocator: std.mem.Allocator,
+    self: *Self,
     image: []const u8,
     quantized: QuantizedBuf,
     width: usize,
     height: usize,
-    all_colors: *const [quantize.color_array_size]QuantizedColor,
 ) !void {
-    _ = all_colors;
     // create a copy of the image to avoid modifying the original.
-    const bgra = try allocator.alloc(u8, image.len);
-    defer allocator.free(bgra);
+    const bgra = try self.allocator.alloc(u8, image.len);
+    defer self.allocator.free(bgra);
 
     @memcpy(bgra, image);
 
@@ -64,13 +114,12 @@ pub fn ditherBgraImage(
         for (0..width) |col| {
             const i = row * width + col;
             // 1. replace the pixel with the closest color.
-            const indx = findClosestColor(
-                quantized.color_table,
+            const indx = try self.findClosestColor(
                 bgra[i * 4 + 2], // r
                 bgra[i * 4 + 1], // g
                 bgra[i * 4 + 0], // b
             );
-            quantized_buf[i] = @truncate(indx);
+            quantized_buf[i] = indx;
 
             // 2. Find the quantization error for this pixel.
             const err = quantizationError(bgra, &quantized, i);
@@ -190,8 +239,6 @@ test "quantize and dither" {
         0,   0,   0,
         100, 100, 100,
     };
-
-    std.debug.print("\n", .{});
 
     var quantized = [_]u8{ 1, 1, 0, 0 };
     try ditherBgraImage(

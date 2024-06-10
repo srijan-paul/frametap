@@ -1,6 +1,7 @@
 pub const core = @import("core.zig");
 const std = @import("std");
 const gif = @import("gif.zig");
+const Timer = @import("timer.zig");
 
 const FrameTap = core.FrameTap(*std.ArrayList(core.Frame));
 fn onFrame(frames: *std.ArrayList(core.Frame), frame: core.Frame) !void {
@@ -19,8 +20,8 @@ pub fn main() !void {
     var frametap = try FrameTap.init(allocator, &frames, core.Rect{
         .x = 0,
         .y = 51,
-        .width = 422,
-        .height = 187,
+        .width = 320,
+        .height = 563,
     });
 
     defer {
@@ -36,6 +37,10 @@ pub fn main() !void {
     std.time.sleep(2.5 * std.time.ns_per_s);
 
     try frametap.capture.end();
+
+    var t: Timer = .{};
+    t.start();
+
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
         .path = "dither.gif",
@@ -43,10 +48,16 @@ pub fn main() !void {
         .use_dithering = true,
     });
 
+    const time_with_dithering = t.end();
+    std.debug.print("encoding with dithering took {} ms\n", .{time_with_dithering});
+
+    t.start();
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
         .path = "no_dither.gif",
         .use_global_palette = true,
         .use_dithering = false,
     });
+    const time_without_dithering = t.end();
+    std.debug.print("encoding without dithering took {} ms\n", .{time_without_dithering});
 }
