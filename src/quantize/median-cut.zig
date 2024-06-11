@@ -161,7 +161,7 @@ pub fn quantizeBgraFrames(config: QuantizerConfig, bgra_bufs: []const []const u8
     // 3. Go over each frame in the input, and replace every pixel with an index into
     // the color table.
     const quantized_frames = try allocator.alloc([]u8, bgra_bufs.len);
-    var ditherer = Dither.init(allocator, &all_colors, color_table);
+    var ditherer = try Dither.init(allocator, &all_colors, color_table);
     defer ditherer.deinit();
     for (0.., bgra_bufs) |i, bgra_frame| {
         const npixels = bgra_frame.len / 4;
@@ -243,7 +243,8 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
     }
 
     if (config.use_dithering) {
-        var ditherer = Dither.init(allocator, &all_colors, color_table);
+        var ditherer = try Dither.init(allocator, &all_colors, color_table);
+        defer ditherer.deinit();
         try ditherer.ditherBgraImage(
             image,
             .{ .quantized_buf = image_buf, .color_table = color_table },

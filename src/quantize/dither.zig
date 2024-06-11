@@ -39,18 +39,19 @@ pub fn init(
     allocator: std.mem.Allocator,
     all_colors: *[color_array_size]QuantizedColor,
     color_table: []const u8,
-) Self {
+) !Self {
     return Self{
         .color_table = color_table,
         .all_colors = all_colors,
         .allocator = allocator,
-        .kd_tree = KdTree.init(allocator, color_table),
+        .kd_tree = try KdTree.init(allocator, color_table),
         .nearest_color_map = ColorMap.init(allocator),
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.nearest_color_map.deinit();
+    self.kd_tree.deinit();
 }
 
 const ErrDiffusion = struct {
@@ -65,38 +66,19 @@ const floyd_steinberg = [_]ErrDiffusion{
     .{ .offset = .{ 1, 1 }, .factor = 1.0 / 16.0 },
 };
 
-pub inline fn colorToKey(r: u32, b: u32, g: u32) u32 {
-    return (r << 16) | (g << 8) | b;
-}
+fn findNearestColor(self: *Self, color: [3]u8) !u8 {
+    const key: u32 =
+        (@as(u32, color[0]) << 16) |
+        (@as(u32, color[1]) << 8) |
+        (color[2]);
 
-pub fn findClosestColor(self: *Self, r_u8: u8, g_u8: u8, b_u8: u8) !u8 {
-    const r: i32 = r_u8;
-    const g: i32 = g_u8;
-    const b: i32 = b_u8;
-
-    const color_id = colorToKey(r_u8, g_u8, b_u8);
-    if (self.nearest_color_map.get(color_id)) |cached_index| {
-        return cached_index;
+    if (self.nearest_color_map.get(key)) |v| {
+        return v;
     }
 
-    var min_distance: i32 = std.math.maxInt(i32);
-    var closest_index: usize = 0;
-
-    const color_table = self.color_table;
-    for (0..color_table.len / 3) |i| {
-        const r_diff = r - color_table[i * 3 + 0];
-        const g_diff = g - color_table[i * 3 + 1];
-        const b_diff = b - color_table[i * 3 + 2];
-
-        const distance: i32 = r_diff * r_diff + g_diff * g_diff + b_diff * b_diff;
-        if (distance < min_distance) {
-            min_distance = distance;
-            closest_index = i;
-        }
-    }
-
-    try self.nearest_color_map.put(color_id, @truncate(closest_index));
-    return @truncate(closest_index);
+    const i = self.kd_tree.findNearestColor(color).color_table_index;
+    try self.nearest_color_map.put(key, i);
+    return i;
 }
 
 pub fn ditherBgraImage(
@@ -118,12 +100,12 @@ pub fn ditherBgraImage(
         for (0..width) |col| {
             const i = row * width + col;
             // 1. replace the pixel with the closest color.
-            const indx = try self.findClosestColor(
+            const nearest_color_index = try self.findNearestColor(.{
                 bgra[i * 4 + 2], // r
                 bgra[i * 4 + 1], // g
                 bgra[i * 4 + 0], // b
-            );
-            quantized_buf[i] = indx;
+            });
+            quantized_buf[i] = nearest_color_index;
 
             // 2. Find the quantization error for this pixel.
             const err = quantizationError(bgra, &quantized, i);
@@ -224,9 +206,9 @@ test "quantize and dither" {
         const grey_value: i64 = @intCast((r + g + b) / 3);
         const d100 = @abs(grey_value - 100);
         const d0 = @abs(grey_value - 0);
-        color.new_index = if (d0 < d100) 0 else 1;
+        color.index_in_color_table = if (d0 < d100) 0 else 1;
 
-        if (color.new_index == 0) {
+        if (color.index_in_color_table == 0) {
             r = 0;
             g = 0;
             b = 0;
@@ -245,14 +227,13 @@ test "quantize and dither" {
     };
 
     var quantized = [_]u8{ 1, 1, 0, 0 };
-    try ditherBgraImage(
-        allocator,
-        &bgra,
-        .{ .quantized_buf = &quantized, .color_table = &color_table },
-        2,
-        2,
-        &all_colors,
-    );
+    var dither = try Self.init(allocator, &all_colors, &color_table);
+    defer dither.deinit();
+
+    try dither.ditherBgraImage(&bgra, .{
+        .quantized_buf = &quantized,
+        .color_table = &color_table,
+    }, 2, 2);
 
     try t.expectEqualDeep([_]u8{ 1, 0, 0, 0 }, quantized);
 }

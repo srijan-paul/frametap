@@ -119,7 +119,7 @@ pub const KDTree = struct {
     ) bool {
         return switch (sibling.*) {
             .non_leaf => |*sibling_node| {
-                return intersects(&sibling_node.bounding_box, color, best_dist) or true;
+                return intersects(&sibling_node.bounding_box, color, best_dist);
             },
             .leaf => |leaf_color| {
                 const dist = squaredDistRgb(leaf_color.rgb, color.*);
@@ -151,7 +151,7 @@ pub const KDTree = struct {
 
                         var node_to_visit: ?*const KdNode = null; // subtree to visit next.
                         var other_node: ?*const KdNode = null; // sibling of subtree to visit.
-                        if (color[dim] <= split_key[dim]) {
+                        if (color[dim] < split_key[dim]) {
                             node_to_visit = node.left;
                             other_node = node.right;
                         } else {
@@ -163,6 +163,7 @@ pub const KDTree = struct {
                             stack.push(.{ .node = n, .sibling = other_node });
                             continue;
                         } else if (other_node) |s| {
+                            std.debug.assert(std.mem.eql(u8, @tagName(s.*), "leaf"));
                             stack.push(.{ .node = s, .sibling = node_to_visit });
                             continue;
                         }
@@ -220,7 +221,7 @@ pub const KDTree = struct {
         bounding_box: BoundingBox,
         colors: []Color,
     ) !struct { root: KdNonLeafNode, depth: usize } {
-        std.debug.assert(colors.len > 4);
+        std.debug.assert(colors.len > 1);
 
         var root: KdNonLeafNode = undefined;
         root.cut_dim = 0; // red.
@@ -228,13 +229,7 @@ pub const KDTree = struct {
 
         std.sort.heap(Color, colors, root.cut_dim, colorLessThan);
 
-        var median = colors.len / 2;
-        while (median + 1 < colors.len and
-            colors[median].rgb[0] == colors[median + 1].rgb[0])
-        {
-            median += 1;
-        }
-
+        const median = colors.len / 2;
         root.key = colors[median];
 
         var depth: usize = 1;
@@ -242,11 +237,15 @@ pub const KDTree = struct {
         const left = try allocator.create(KdNode);
         left.* = try constructRecursive(allocator, &root, true, colors[0..median], 1, &depth);
 
-        const right = try allocator.create(KdNode);
-        right.* = try constructRecursive(allocator, &root, false, colors[median + 1 ..], 1, &depth);
+        if (median + 1 < colors.len) {
+            const right = try allocator.create(KdNode);
+            right.* = try constructRecursive(allocator, &root, false, colors[median + 1 ..], 1, &depth);
+            root.right = right;
+        } else {
+            root.right = null;
+        }
 
         root.left = left;
-        root.right = right;
 
         return .{ .root = root, .depth = depth };
     }
@@ -276,7 +275,10 @@ pub const KDTree = struct {
         current_depth: usize,
         total_depth: *usize,
     ) !KdNode {
-        std.debug.assert(colors.len > 1);
+        if (colors.len == 1) {
+            total_depth.* = @max(total_depth.*, current_depth);
+            return KdNode{ .leaf = colors[0] };
+        }
 
         total_depth.* = @max(total_depth.*, current_depth);
 
@@ -287,16 +289,7 @@ pub const KDTree = struct {
         // sort all colors along the cut dimension.
         std.sort.heap(Color, colors, node.cut_dim, colorLessThan);
 
-        var median = colors.len / 2;
-
-        // advance the median pointer if the elements following it are equal.
-        // We want everything on the left to be less than or equal to the median item.
-        while (median + 1 < colors.len and
-            colors[median].rgb[node.cut_dim] == colors[median + 1].rgb[node.cut_dim])
-        {
-            median += 1;
-        }
-
+        const median = colors.len / 2;
         node.key = colors[median];
 
         const lower = colors[0..median];
