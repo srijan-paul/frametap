@@ -20,8 +20,8 @@ pub fn main() !void {
     var frametap = try FrameTap.init(allocator, &frames, core.Rect{
         .x = 0,
         .y = 51,
-        .width = 320,
-        .height = 563,
+        .width = 321,
+        .height = 525,
     });
 
     defer {

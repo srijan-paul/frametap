@@ -1,6 +1,7 @@
 const quantize = @import("median-cut.zig");
 const q = @import("quantize.zig");
 const std = @import("std");
+const KdTree = @import("kd-tree.zig").KdTree;
 
 const color_array_size = quantize.color_array_size;
 const QuantizedColor = quantize.QuantizedColor;
