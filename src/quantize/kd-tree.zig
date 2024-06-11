@@ -6,24 +6,29 @@ const BoundingBox = struct {
     max: [3]u8, // max RGB coords.
 };
 
+const Color = struct {
+    rgb: [3]u8,
+    color_table_index: u8,
+};
+
 /// A non-leaf node in a KD Tree separates the 3-dimensional
 /// RGB space into two sub-spaces along a plain parallel one of the axes (R/G/B)
 /// that contains the `key` point.
 pub const KdNonLeafNode = struct {
     bounding_box: BoundingBox,
     cut_dim: usize, // 0 = r, 1 = g, 2 = b
-    key: [3]u8, // the key that divides the plane in `cut_dim`.
+    key: Color, // the key that divides the plane in `cut_dim`.
     left: ?*KdNode, // left subtree
     right: ?*KdNode, // right subtree
 };
 
 pub const KdNode = union(enum) {
-    leaf: [3]u8, // R-G-B
+    leaf: Color,
     non_leaf: KdNonLeafNode,
 };
 
-fn compareRgb(channel: usize, a: [3]u8, b: [3]u8) bool {
-    return a[channel] < b[channel];
+fn colorLessThan(channel: usize, a: Color, b: Color) bool {
+    return a.rgb[channel] < b.rgb[channel];
 }
 
 inline fn squaredDistRgb(color_a: [3]u8, color_b: [3]u8) usize {
@@ -55,7 +60,7 @@ pub const KDTree = struct {
     pub fn init(allocator: std.mem.Allocator, color_table: []const u8) !KDTree {
         std.debug.assert(color_table.len % 3 == 0);
         const ncolors = color_table.len / 3;
-        const colors = try allocator.alloc([3]u8, ncolors);
+        const colors = try allocator.alloc(Color, ncolors);
         defer allocator.free(colors);
 
         // Also compute the bounding box of the root node of the KD Tree.
@@ -64,14 +69,17 @@ pub const KDTree = struct {
 
         for (0..ncolors) |i| {
             colors[i] = .{
-                color_table[i * 3 + 0], // r
-                color_table[i * 3 + 1], // g
-                color_table[i * 3 + 2], // b
+                .rgb = .{
+                    color_table[i * 3 + 0], // r
+                    color_table[i * 3 + 1], // g
+                    color_table[i * 3 + 2], // b
+                },
+                .color_table_index = @truncate(i),
             };
 
             for (0..3) |j| {
-                bb_min[j] = @min(bb_min[j], colors[i][j]);
-                bb_max[j] = @max(bb_max[j], colors[i][j]);
+                bb_min[j] = @min(bb_min[j], colors[i].rgb[j]);
+                bb_max[j] = @max(bb_max[j], colors[i].rgb[j]);
             }
         }
 
@@ -104,40 +112,30 @@ pub const KDTree = struct {
         return true;
     }
 
-    fn checkSibling(
-        stack: *Stack,
+    fn shouldVisitSibling(
         sibling: *const KdNode,
         color: *const [3]u8,
         best_dist: usize,
     ) bool {
-        switch (sibling.*) {
+        return switch (sibling.*) {
             .non_leaf => |*sibling_node| {
-                if (intersects(&sibling_node.bounding_box, color, best_dist) or true) {
-                    // sibling is set to null because we don't want to re-visit the other sub-tree again.
-                    stack.push(.{ .node = sibling, .sibling = null });
-                    return true;
-                }
+                return intersects(&sibling_node.bounding_box, color, best_dist) or true;
             },
             .leaf => |leaf_color| {
-                const dist = squaredDistRgb(leaf_color, color.*);
-                if (dist < best_dist) {
-                    stack.push(.{ .node = sibling, .sibling = null });
-                    return true;
-                }
+                const dist = squaredDistRgb(leaf_color.rgb, color.*);
+                return dist < best_dist;
             },
-        }
-
-        return false;
+        };
     }
 
-    pub fn findNearestColor(self: *const Self, color: [3]u8) [3]u8 {
+    pub fn findNearestColor(self: *const Self, color: [3]u8) *const Color {
         var stack = Stack{};
 
         const root_node = KdNode{ .non_leaf = self.root };
         stack.push(.{ .node = &root_node, .sibling = null });
 
         var best_dist: usize = std.math.maxInt(usize);
-        var nearest = self.root.key;
+        var nearest: *const Color = &self.root.key;
 
         // we start by going down the tree till we find a leaf,
         // then traverse back up.
@@ -149,57 +147,54 @@ pub const KDTree = struct {
                 .non_leaf => |*node| {
                     if (going_down) {
                         const dim = node.cut_dim;
-                        const split_key = node.key;
+                        const split_key = &node.key.rgb;
 
+                        var node_to_visit: ?*const KdNode = null; // subtree to visit next.
+                        var other_node: ?*const KdNode = null; // sibling of subtree to visit.
                         if (color[dim] <= split_key[dim]) {
-                            // go down the left subtree
-                            if (node.left) |left| {
-                                stack.push(.{ .node = left, .sibling = node.right });
-                                continue;
-                            } else if (node.right) |right| {
-                                // If the left subtree is null, we can still go down the right subtree.
-                                stack.push(.{ .node = right, .sibling = node.left });
-                                continue;
-                            }
+                            node_to_visit = node.left;
+                            other_node = node.right;
                         } else {
-                            // go down the right subtree.
-                            if (node.right) |right| {
-                                stack.push(.{ .node = right, .sibling = node.left });
-                                continue;
-                            } else if (node.left) |left| {
-                                // If the right subtree is null, we can still go down the left subtree.
-                                stack.push(.{ .node = left, .sibling = node.right });
-                                continue;
-                            }
+                            node_to_visit = node.right;
+                            other_node = node.left;
                         }
-                        // Neither left nor right half can be visited,
-                        // so start traversing back up the tree.
+
+                        if (node_to_visit) |n| {
+                            stack.push(.{ .node = n, .sibling = other_node });
+                            continue;
+                        } else if (other_node) |s| {
+                            stack.push(.{ .node = s, .sibling = node_to_visit });
+                            continue;
+                        }
+
+                        // Neither left nor right subtree can be visited,
+                        // So start traversing back up the tree.
                         going_down = false;
                     } else {
-                        // Traversing back up the tree.
+                        // we are traversing back up the tree.
                         _ = stack.pop();
 
                         // Check if the current node is nearer than our current best.
-                        const dist = squaredDistRgb(node.key, color);
+                        const dist = squaredDistRgb(node.key.rgb, color);
                         if (dist < best_dist) {
                             best_dist = dist;
-                            nearest = node.key;
+                            nearest = &node.key;
                         }
 
                         // Check if its possible for the sibling to contain a closer color.
                         if (entry.sibling) |sibling| {
-                            const should_visit_sibling = checkSibling(&stack, sibling, &color, best_dist);
-                            if (should_visit_sibling) {
+                            if (shouldVisitSibling(sibling, &color, best_dist)) {
+                                stack.push(.{ .node = sibling, .sibling = null });
                                 going_down = true;
                             }
                         }
                     }
                 },
-                .leaf => |c| {
+                .leaf => |*c| {
                     std.debug.assert(going_down);
 
                     going_down = false;
-                    const dist = squaredDistRgb(c, color);
+                    const dist = squaredDistRgb(c.rgb, color);
                     if (dist < best_dist) {
                         best_dist = dist;
                         nearest = c;
@@ -208,8 +203,8 @@ pub const KDTree = struct {
                     _ = stack.pop();
 
                     if (entry.sibling) |sibling| {
-                        const should_visit_sibling = checkSibling(&stack, sibling, &color, best_dist);
-                        if (should_visit_sibling) {
+                        if (shouldVisitSibling(sibling, &color, best_dist)) {
+                            stack.push(.{ .node = sibling, .sibling = null });
                             going_down = true;
                         }
                     }
@@ -223,7 +218,7 @@ pub const KDTree = struct {
     fn constructKdTree(
         allocator: std.mem.Allocator,
         bounding_box: BoundingBox,
-        colors: [][3]u8,
+        colors: []Color,
     ) !struct { root: KdNonLeafNode, depth: usize } {
         std.debug.assert(colors.len > 4);
 
@@ -231,10 +226,12 @@ pub const KDTree = struct {
         root.cut_dim = 0; // red.
         root.bounding_box = bounding_box;
 
-        std.sort.heap([3]u8, colors, root.cut_dim, compareRgb);
+        std.sort.heap(Color, colors, root.cut_dim, colorLessThan);
 
         var median = colors.len / 2;
-        while (median + 1 < colors.len and colors[median][0] == colors[median + 1][0]) {
+        while (median + 1 < colors.len and
+            colors[median].rgb[0] == colors[median + 1].rgb[0])
+        {
             median += 1;
         }
 
@@ -258,9 +255,9 @@ pub const KDTree = struct {
     inline fn makeChildBoundingBox(parent: *const KdNonLeafNode, is_left: bool) BoundingBox {
         var bb = parent.bounding_box;
         if (is_left) {
-            bb.max[parent.cut_dim] = parent.key[parent.cut_dim];
+            bb.max[parent.cut_dim] = parent.key.rgb[parent.cut_dim];
         } else {
-            bb.min[parent.cut_dim] = parent.key[parent.cut_dim];
+            bb.min[parent.cut_dim] = parent.key.rgb[parent.cut_dim];
         }
         return bb;
     }
@@ -275,7 +272,7 @@ pub const KDTree = struct {
         allocator: std.mem.Allocator,
         parent_node: *const KdNonLeafNode,
         is_left_child: bool,
-        colors: [][3]u8,
+        colors: []Color,
         current_depth: usize,
         total_depth: *usize,
     ) !KdNode {
@@ -288,14 +285,14 @@ pub const KDTree = struct {
         node.bounding_box = makeChildBoundingBox(parent_node, is_left_child);
 
         // sort all colors along the cut dimension.
-        std.sort.heap([3]u8, colors, node.cut_dim, compareRgb);
+        std.sort.heap(Color, colors, node.cut_dim, colorLessThan);
 
         var median = colors.len / 2;
 
         // advance the median pointer if the elements following it are equal.
         // We want everything on the left to be less than or equal to the median item.
         while (median + 1 < colors.len and
-            colors[median][node.cut_dim] == colors[median + 1][node.cut_dim])
+            colors[median].rgb[node.cut_dim] == colors[median + 1].rgb[node.cut_dim])
         {
             median += 1;
         }
@@ -394,13 +391,13 @@ test "KDTree construction" {
     try t.expectEqual(2, tree.depth);
 
     try t.expectEqual(0, tree.root.cut_dim);
-    try t.expectEqualDeep([3]u8{ 80, 100, 0 }, tree.root.key);
+    try t.expectEqualDeep([3]u8{ 80, 100, 0 }, tree.root.key.rgb);
     try t.expectEqualDeep([3]u8{ 0, 0, 0 }, tree.root.bounding_box.min);
     try t.expectEqualDeep([3]u8{ 200, 200, 200 }, tree.root.bounding_box.max);
 
     const left_of_root = tree.root.left.?.non_leaf;
     try t.expect(left_of_root.cut_dim == 1);
-    try t.expectEqualDeep([3]u8{ 0, 100, 22 }, left_of_root.key);
+    try t.expectEqualDeep([3]u8{ 0, 100, 22 }, left_of_root.key.rgb);
     try t.expectEqualDeep([3]u8{ 0, 0, 0 }, left_of_root.bounding_box.min);
     try t.expectEqualDeep([3]u8{ 80, 200, 200 }, left_of_root.bounding_box.max);
 
@@ -408,7 +405,7 @@ test "KDTree construction" {
     if (left_of_root.left) |left_left| {
         switch (left_left.*) {
             .leaf => |color| {
-                try t.expectEqualDeep([3]u8{ 0, 55, 100 }, color);
+                try t.expectEqualDeep([3]u8{ 0, 55, 100 }, color.rgb);
             },
             else => {
                 std.debug.panic("impossible!", .{});
@@ -418,15 +415,15 @@ test "KDTree construction" {
 
     const right_of_root = tree.root.right.?.non_leaf;
     try t.expectEqual(1, right_of_root.cut_dim);
-    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, right_of_root.key);
+    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, right_of_root.key.rgb);
     try t.expectEqualDeep([3]u8{ 80, 0, 0 }, right_of_root.bounding_box.min);
     try t.expectEqualDeep([3]u8{ 200, 200, 200 }, right_of_root.bounding_box.max);
 
     var c = tree.findNearestColor([3]u8{ 197, 11, 78 });
-    try t.expectEqualDeep([3]u8{ 200, 0, 0 }, c);
+    try t.expectEqualDeep([3]u8{ 200, 0, 0 }, c.rgb);
 
     c = tree.findNearestColor([3]u8{ 8, 123, 139 });
-    try t.expectEqualDeep([3]u8{ 0, 55, 100 }, c);
+    try t.expectEqualDeep([3]u8{ 0, 55, 100 }, c.rgb);
 
     for (0..color_table.len / 3) |i| {
         const clr = [3]u8{
@@ -437,14 +434,14 @@ test "KDTree construction" {
 
         const actual = tree.findNearestColor(clr);
         const expected = clr;
-        try t.expectEqualDeep(expected, actual);
+        try t.expectEqualDeep(expected, actual.rgb);
     }
 
     c = tree.findNearestColor([3]u8{ 120, 1, 200 });
-    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, c);
+    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, c.rgb);
 
     c = tree.findNearestColor([3]u8{ 100, 3, 200 });
-    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, c);
+    try t.expectEqualDeep([3]u8{ 100, 1, 200 }, c.rgb);
 
     var gen = std.rand.DefaultPrng.init(@abs(std.time.milliTimestamp()));
     for (0..10_000) |_| {
@@ -458,7 +455,7 @@ test "KDTree construction" {
         const actual = tree.findNearestColor(target);
 
         const expected_dist = squaredDistRgb(target, expected);
-        const actual_dist = squaredDistRgb(target, actual);
+        const actual_dist = squaredDistRgb(target, actual.rgb);
 
         try t.expectEqual(expected_dist, actual_dist);
     }
@@ -506,7 +503,7 @@ test "KDTree – Search" {
         };
 
         const expected = findNearestBrute(color_table, target);
-        const actual = tree.findNearestColor(target);
+        const actual = tree.findNearestColor(target).rgb;
 
         const expected_dist = squaredDistRgb(target, expected);
         const actual_dist = squaredDistRgb(target, actual);

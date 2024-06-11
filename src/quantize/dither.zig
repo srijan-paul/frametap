@@ -1,7 +1,7 @@
 const quantize = @import("median-cut.zig");
 const q = @import("quantize.zig");
 const std = @import("std");
-const KdTree = @import("kd-tree.zig").KdTree;
+const KdTree = @import("kd-tree.zig").KDTree;
 
 const color_array_size = quantize.color_array_size;
 const QuantizedColor = quantize.QuantizedColor;
@@ -33,6 +33,8 @@ nearest_color_map: ColorMap,
 /// A contiguous array of colors (RGBRGBRGB...) that are present in the quantized image.
 color_table: []const u8,
 
+kd_tree: KdTree,
+
 pub fn init(
     allocator: std.mem.Allocator,
     all_colors: *[color_array_size]QuantizedColor,
@@ -42,6 +44,7 @@ pub fn init(
         .color_table = color_table,
         .all_colors = all_colors,
         .allocator = allocator,
+        .kd_tree = KdTree.init(allocator, color_table),
         .nearest_color_map = ColorMap.init(allocator),
     };
 }
