@@ -3,6 +3,8 @@ const q = @import("quantize.zig");
 const std = @import("std");
 const KdTree = @import("kd-tree.zig").KDTree;
 
+// const Timer = @import("../timer.zig");
+
 const color_array_size = quantize.color_array_size;
 const QuantizedColor = quantize.QuantizedColor;
 
@@ -24,16 +26,15 @@ pub const QuantizedBuf = struct {
     quantized_buf: []u8,
 };
 
-const ColorMap = std.hash_map.HashMap(u32, u8, ColorHasher, 80);
-
 allocator: std.mem.Allocator,
 all_colors: *[color_array_size]QuantizedColor,
-/// Maps the id of an RGB color to the nearest approximation we have in our color table.
-nearest_color_map: ColorMap,
 /// A contiguous array of colors (RGBRGBRGB...) that are present in the quantized image.
 color_table: []const u8,
 
 kd_tree: KdTree,
+
+// timer: Timer = .{},
+// total_kd_time: i64 = 0.0,
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -45,12 +46,10 @@ pub fn init(
         .all_colors = all_colors,
         .allocator = allocator,
         .kd_tree = try KdTree.init(allocator, color_table),
-        .nearest_color_map = ColorMap.init(allocator),
     };
 }
 
 pub fn deinit(self: *Self) void {
-    self.nearest_color_map.deinit();
     self.kd_tree.deinit();
 }
 
@@ -66,19 +65,24 @@ const floyd_steinberg = [_]ErrDiffusion{
     .{ .offset = .{ 1, 1 }, .factor = 1.0 / 16.0 },
 };
 
-fn findNearestColor(self: *Self, color: [3]u8) !u8 {
-    const key: u32 =
-        (@as(u32, color[0]) << 16) |
-        (@as(u32, color[1]) << 8) |
-        (color[2]);
+pub inline fn nearestColor(self: *Self, color: [3]u8) u8 {
+    const nearest = quantize.getGlobalColor(
+        self.all_colors,
+        color[0],
+        color[1],
+        color[2],
+    );
 
-    if (self.nearest_color_map.get(key)) |v| {
-        return v;
+    const index = nearest.index_in_color_table;
+    if (index != 0) {
+        return index;
     }
 
-    const i = self.kd_tree.findNearestColor(color).color_table_index;
-    try self.nearest_color_map.put(key, i);
-    return i;
+    // self.timer.start();
+    const nearest_idx = self.kd_tree.findNearestColor(color).color_table_index;
+    // self.total_kd_time += self.timer.end();
+    nearest.index_in_color_table = nearest_idx;
+    return nearest_idx;
 }
 
 pub fn ditherBgraImage(
@@ -100,7 +104,7 @@ pub fn ditherBgraImage(
         for (0..width) |col| {
             const i = row * width + col;
             // 1. replace the pixel with the closest color.
-            const nearest_color_index = try self.findNearestColor(.{
+            const nearest_color_index = self.nearestColor(.{
                 bgra[i * 4 + 2], // r
                 bgra[i * 4 + 1], // g
                 bgra[i * 4 + 0], // b
@@ -140,6 +144,8 @@ pub fn ditherBgraImage(
             }
         }
     }
+
+    // std.debug.print("Total KD time: {d}ms\n", .{self.total_kd_time});
 }
 
 /// Adds the quantization error to the color value and returns the new color.

@@ -234,12 +234,8 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
         const g = image[i * 4 + 1];
         const r = image[i * 4 + 2];
 
-        const r_mask = @as(usize, r >> shift) << (2 * bits_per_prim_color);
-        const g_mask = @as(usize, g >> shift) << bits_per_prim_color;
-        const b_mask = @as(usize, b >> shift);
-        const index: usize = r_mask | g_mask | b_mask;
-
-        image_buf[i] = all_colors[index].index_in_color_table;
+        const nearest_color = getGlobalColor(&all_colors, r, g, b);
+        image_buf[i] = nearest_color.index_in_color_table;
     }
 
     if (config.use_dithering) {

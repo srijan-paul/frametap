@@ -19,7 +19,7 @@ pub export fn releaseFrame(frame: CFrame) void {
 pub export fn captureFrame(x: f32, y: f32, width: f32, height: f32) CFrame {
     const allocator = std.heap.page_allocator;
     const FrameTap = core.FrameTap(?*anyopaque);
-    var frametap = FrameTap.init(allocator, null) catch {
+    var frametap = FrameTap.init(allocator, null, null) catch {
         return CFrame{ .data = null, .width = 0, .height = 0 };
     };
 

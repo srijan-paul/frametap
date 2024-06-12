@@ -20,8 +20,8 @@ pub fn main() !void {
     var frametap = try FrameTap.init(allocator, &frames, core.Rect{
         .x = 0,
         .y = 51,
-        .width = 321,
-        .height = 525,
+        .width = 1000,
+        .height = 500,
     });
 
     defer {
@@ -34,7 +34,7 @@ pub fn main() !void {
     frametap.onFrame(onFrame);
 
     _ = try std.Thread.spawn(.{}, captureFrames, .{frametap});
-    std.time.sleep(2.5 * std.time.ns_per_s);
+    std.time.sleep(6 * std.time.ns_per_s);
 
     try frametap.capture.end();
 
@@ -44,7 +44,7 @@ pub fn main() !void {
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
         .path = "dither.gif",
-        .use_global_palette = true,
+        .use_global_palette = false,
         .use_dithering = true,
     });
 
@@ -55,7 +55,7 @@ pub fn main() !void {
     try gif.encodeGif(allocator, .{
         .frames = frames.items,
         .path = "no_dither.gif",
-        .use_global_palette = true,
+        .use_global_palette = false,
         .use_dithering = false,
     });
     const time_without_dithering = t.end();

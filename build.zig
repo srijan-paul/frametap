@@ -24,6 +24,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    lib.addIncludePath(std.Build.LazyPath.relative("native"));
+    lib.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+
+    lib.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
+    lib.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
+
+    lib.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
+    lib.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
+    lib.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
+
+    lib.linkLibC();
+
     const exe = b.addExecutable(.{
         .name = "main",
         .root_source_file = .{ .path = "src/main.zig" },
