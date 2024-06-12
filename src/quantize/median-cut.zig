@@ -6,6 +6,8 @@ const QuantizedImage = q.QuantizedImage;
 const QuantizedFrames = q.QuantizedFrames;
 const QuantizerConfig = q.QuantizerConfig;
 
+const KDTree = @import("kd-tree.zig").KDTree;
+
 // Implements the color quantization algorithm described here:
 // https://dl.acm.org/doi/pdf/10.1145/965145.801294
 // Color Image Quantization for frame buffer display.
@@ -162,7 +164,6 @@ pub fn quantizeBgraFrames(config: QuantizerConfig, bgra_bufs: []const []const u8
     // the color table.
     const quantized_frames = try allocator.alloc([]u8, bgra_bufs.len);
     var ditherer = try Dither.init(allocator, &all_colors, color_table);
-    defer ditherer.deinit();
     for (0.., bgra_bufs) |i, bgra_frame| {
         const npixels = bgra_frame.len / 4;
         const quantized_frame = try allocator.alloc(u8, npixels);
@@ -240,7 +241,6 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
 
     if (config.use_dithering) {
         var ditherer = try Dither.init(allocator, &all_colors, color_table);
-        defer ditherer.deinit();
         try ditherer.ditherBgraImage(
             image,
             .{ .quantized_buf = image_buf, .color_table = color_table },
@@ -324,6 +324,16 @@ fn quantizeHistogram(
         color_table[i * 3] = @intCast((rgb_sum[0] << shift) / partition.num_colors);
         color_table[i * 3 + 1] = @intCast((rgb_sum[1] << shift) / partition.num_colors);
         color_table[i * 3 + 2] = @intCast((rgb_sum[2] << shift) / partition.num_colors);
+    }
+
+    var kdtree = try KDTree.init(allocator, color_table);
+    for (all_colors) |*color| {
+        const r = color.RGB[0] << shift;
+        const g = color.RGB[1] << shift;
+        const b = color.RGB[2] << shift;
+        const nearest = kdtree.findNearestColor([3]u8{ r, g, b }).color_table_index;
+
+        color.index_in_color_table = nearest;
     }
 
     return color_table;

@@ -66,6 +66,17 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
+    const benchmark_exe = b.addExecutable(.{
+        .name = "benchmark",
+        .root_source_file = .{ .path = "src/quantize/kdtree-benchmark.zig" },
+        .target = target,
+        .optimize = std.builtin.OptimizeMode.ReleaseFast,
+    });
+
+    b.installArtifact(benchmark_exe);
+    const m = b.addModule("timer", .{ .root_source_file = .{ .path = "src/timer.zig" } });
+    benchmark_exe.root_module.addImport("timer", m);
+
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the executable");
     run_step.dependOn(&run_exe.step);

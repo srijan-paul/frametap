@@ -1,7 +1,6 @@
 const quantize = @import("median-cut.zig");
 const q = @import("quantize.zig");
 const std = @import("std");
-const KdTree = @import("kd-tree.zig").KDTree;
 
 // const Timer = @import("../timer.zig");
 
@@ -31,8 +30,6 @@ all_colors: *[color_array_size]QuantizedColor,
 /// A contiguous array of colors (RGBRGBRGB...) that are present in the quantized image.
 color_table: []const u8,
 
-kd_tree: KdTree,
-
 // timer: Timer = .{},
 // total_kd_time: i64 = 0.0,
 
@@ -45,12 +42,7 @@ pub fn init(
         .color_table = color_table,
         .all_colors = all_colors,
         .allocator = allocator,
-        .kd_tree = try KdTree.init(allocator, color_table),
     };
-}
-
-pub fn deinit(self: *Self) void {
-    self.kd_tree.deinit();
 }
 
 const ErrDiffusion = struct {
@@ -74,15 +66,7 @@ pub inline fn nearestColor(self: *Self, color: [3]u8) u8 {
     );
 
     const index = nearest.index_in_color_table;
-    if (index != 0) {
-        return index;
-    }
-
-    // self.timer.start();
-    const nearest_idx = self.kd_tree.findNearestColor(color).color_table_index;
-    // self.total_kd_time += self.timer.end();
-    nearest.index_in_color_table = nearest_idx;
-    return nearest_idx;
+    return index;
 }
 
 pub fn ditherBgraImage(
