@@ -100,7 +100,6 @@ pub const MacOSScreenCapture = struct {
         const self = @fieldParentPtr(Self, "capture", capturer);
         // TODO: handle the return value
         _ = screencap.stop_capture(self.capture_c);
-        std.debug.print("Capture stopped\n", .{});
     }
 
     /// Initialize a MacOS specific capturer.

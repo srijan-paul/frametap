@@ -1,121 +1,137 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+const Step = std.Build.Step;
+
+fn addCaptureLib(compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.LazyPath.relative("native"));
+    compile.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+}
+
+fn addCGif(compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
+    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
+    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
+}
+
+fn addPngLib(compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
+    compile.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
+}
+
+fn addMacosDeps(b: *std.Build, compile: *Step.Compile) void {
+    const objc = b.dependency("zig-objc", .{});
+    compile.root_module.addImport("objc", objc.module("objc"));
+    compile.linkSystemLibrary("objc");
+    compile.linkFramework("Foundation");
+    compile.linkFramework("AppKit");
+    compile.linkFramework("ScreenCaptureKit");
+    compile.linkFramework("CoreVideo");
+    compile.linkFramework("CoreMedia");
+}
+
+fn addImport(
+    compile: *Step.Compile,
+    name: [:0]const u8,
+    module: *std.Build.Module,
+) void {
+    compile.root_module.addImport(name, module);
+}
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "jif",
+    const timerModule = b.addModule("timer", .{ .root_source_file = .{ .path = "src/timer.zig" } });
+
+    const quantizeLib = b.addStaticLibrary(.{
+        .name = "quantize",
+        .root_source_file = .{ .path = "src/quantize/quantize.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    addImport(quantizeLib, "timer", timerModule);
+
+    const quantizeModule = &quantizeLib.root_module;
+
+    const zgifLibrary = b.addStaticLibrary(.{
+        .name = "zgif",
+        .root_source_file = .{ .path = "src/gif/gif.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    addCGif(zgifLibrary);
+    addImport(zgifLibrary, "quantize", quantizeModule);
+
+    const zgifModule = &zgifLibrary.root_module;
+
+    const library = b.addStaticLibrary(.{
+        .name = "frametap",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/lib/core.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    lib.addIncludePath(std.Build.LazyPath.relative("native"));
-    lib.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+    addImport(library, "zgif", zgifModule);
+    addCaptureLib(library);
+    addPngLib(library);
+    b.installArtifact(library);
 
-    lib.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
-    lib.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
+    {
+        const exe = b.addExecutable(.{
+            .name = "main",
+            .root_source_file = .{ .path = "src/main.zig" },
+            .target = target,
+            .optimize = optimize,
+        });
 
-    lib.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
-    lib.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
-    lib.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
+        addImport(exe, "zgif", zgifModule);
+        addImport(exe, "frametap", &library.root_module);
+        addMacosDeps(b, exe);
 
-    lib.linkLibC();
+        b.installArtifact(exe);
 
-    const exe = b.addExecutable(.{
-        .name = "main",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+        const run_exe = b.addRunArtifact(exe);
+        const run_step = b.step("run", "Run the executable");
+        run_step.dependOn(&run_exe.step);
+    }
 
-    const objc = b.dependency("zig-objc", .{});
-    exe.root_module.addImport("objc", objc.module("objc"));
-    exe.linkSystemLibrary("objc");
-    exe.linkFramework("Foundation");
-    exe.linkFramework("AppKit");
-    exe.linkFramework("ScreenCaptureKit");
-    exe.linkFramework("CoreVideo");
-    exe.linkFramework("CoreMedia");
+    {
+        const benchmark_exe = b.addExecutable(.{
+            .name = "benchmark",
+            .root_source_file = .{ .path = "src/quantize/kdtree-benchmark.zig" },
+            .target = target,
+            .optimize = std.builtin.OptimizeMode.ReleaseFast,
+        });
 
-    exe.addIncludePath(std.Build.LazyPath.relative("native"));
-    exe.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+        addImport(benchmark_exe, "timer", timerModule);
+        b.installArtifact(benchmark_exe);
+    }
 
-    // Link the `lodepng` library. Used to encode frames to PNG (if needed).
-    exe.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
-    exe.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
-
-    // Add the "CGIF" library. Used for GIF encoding.
-    exe.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
-    exe.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
-    exe.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
-
-    exe.linkLibC();
-
-    const benchmark_exe = b.addExecutable(.{
-        .name = "benchmark",
-        .root_source_file = .{ .path = "src/quantize/kdtree-benchmark.zig" },
-        .target = target,
-        .optimize = std.builtin.OptimizeMode.ReleaseFast,
-    });
-
-    b.installArtifact(benchmark_exe);
-    const m = b.addModule("timer", .{ .root_source_file = .{ .path = "src/timer.zig" } });
-    benchmark_exe.root_module.addImport("timer", m);
-
-    const run_exe = b.addRunArtifact(exe);
-    const run_step = b.step("run", "Run the executable");
-    run_step.dependOn(&run_exe.step);
-
-    const dll = b.addSharedLibrary(.{
-        .name = "frametap",
-        .root_source_file = .{ .path = "src/lib.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // macOS specific
-    dll.root_module.addImport("objc", objc.module("objc"));
-    dll.linkSystemLibrary("objc");
-    dll.linkFramework("Foundation");
-    dll.linkFramework("AppKit");
-    dll.linkFramework("ScreenCaptureKit");
-    dll.linkFramework("CoreVideo");
-    dll.linkFramework("CoreMedia");
-
-    // macOS screencapture implementation
-    dll.addIncludePath(std.Build.LazyPath.relative("native"));
-    dll.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
-
-    // lodepng
-    dll.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
-    dll.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
-
-    const dll_artifact = b.addInstallArtifact(dll, .{});
-    const dll_step = b.step("dll", "Make shared library");
-    dll_step.dependOn(&dll_artifact.step);
-
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
-    b.installArtifact(lib);
-    b.installArtifact(dll);
-    b.installArtifact(exe);
-
+    // TODO: re-add the C library
+    // {
+    //     const dll = b.addSharedLibrary(.{
+    //         .name = "frametap",
+    //         .root_source_file = .{ .path = "src/lib.zig" },
+    //         .target = target,
+    //         .optimize = optimize,
+    //     });
+    //
+    //     addMacosDeps(b, dll);
+    //     addCaptureLib(dll);
+    //
+    //     const dll_artifact = b.addInstallArtifact(dll, .{});
+    //     const dll_step = b.step("dll", "Make shared library");
+    //     dll_step.dependOn(&dll_artifact.step);
+    //
+    //     b.installArtifact(dll);
+    // }
+    //
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const main_tests = b.addTest(.{
