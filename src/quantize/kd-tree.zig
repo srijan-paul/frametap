@@ -387,7 +387,7 @@ test "KDTree – Search" {
     const tree = try KDTree.init(allocator, color_table);
     defer tree.deinit();
 
-    for (0..10_000) |_| {
+    for (0..std.math.pow(2, 15)) |_| {
         const target = .{
             gen.random().int(u8),
             gen.random().int(u8),

@@ -53,7 +53,7 @@ pub const Gif = struct {
         const cgif_frame_config = try allocator.create(cgif.CGIF_FrameConfig);
         initFrameConfig(cgif_frame_config);
         cgif_frame_config.genFlags =
-            cgif.CGIF_FRAME_GEN_USE_TRANSPARENCY | // TODO: set transIndex
+            // cgif.CGIF_FRAME_GEN_USE_TRANSPARENCY | // TODO: set transIndex
             cgif.CGIF_FRAME_GEN_USE_DIFF_WINDOW;
 
         var gif: ?*cgif.CGIF = null;
