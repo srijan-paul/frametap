@@ -19,6 +19,9 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
                    ofType:(SCStreamOutputType)type {
 
+  assert(sampleBuffer != nil);
+
+  CFRetain(sampleBuffer);
   if (type != SCStreamOutputTypeScreen) {
     CFRelease(sampleBuffer);
     return;
@@ -31,15 +34,20 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
   }
 
   CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+
   if (pixelBuffer == NULL) {
-		// NSLog(@"Dropped frame");
-		CFRelease(sampleBuffer);
+    CFRelease(sampleBuffer);
     // dropped frames!? why does this happen.
     return;
   }
 
-  // Lock the base address of the pixel buffer
-  CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+    // Lock the base address of the pixel buffer
+  CVReturn const ok =
+      CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+  if (ok != kCVReturnSuccess) {
+    CFRelease(sampleBuffer);
+    return;
+  }
 
   uint8_t *baseAddress = (uint8_t *)CVPixelBufferGetBaseAddress(pixelBuffer);
   size_t const bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
@@ -61,11 +69,13 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
   }
 
   uint8_t *outputBuf = malloc(outWidth * outHeight * 4);
+  assert(outputBuf != nil);
+
   for (size_t i = 0; i < outHeight; i++) {
     for (size_t j = 0; j < outWidth; j++) {
       size_t const inIdx = ((i + y) * width + (j + x)) * 4;
       size_t const outIdx = (i * outWidth + j) * 4;
-			memcpy(outputBuf + outIdx, baseAddress + inIdx, 4);
+      memcpy(outputBuf + outIdx, baseAddress + inIdx, 4);
     }
   }
 
@@ -78,13 +88,13 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image);
     };
     CMTime timeOfCapture = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
     add_frame(self.sc, timeOfCapture, image);
+  } else {
+    free(outputBuf);
   }
-
-	free(outputBuf);
 
   // Unlock the pixel buffer
   CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-	CFRelease(sampleBuffer);
+  CFRelease(sampleBuffer);
 }
 @end
 
@@ -120,6 +130,7 @@ void add_frame(ScreenCapture *sc, CMTime time, ImageData image) {
         .duration_in_ms = CMTimeGetSeconds(duration) * 1000,
     };
     sc->frame_processor.process_fn(frame, sc->frame_processor.other_data);
+    deinit_imagedata(&frame.image);
   }
 
   sc->capture_time = time;
@@ -370,9 +381,7 @@ ImageData grab_screen(ScreenCapture *sc, const CaptureRect *rect) {
 }
 
 void deinit_imagedata(ImageData *frame) {
-  if (frame == nil) {
-    return;
-  }
+  assert(frame != nil);
 
   if (frame->rgba_buf != nil) {
     free(frame->rgba_buf);

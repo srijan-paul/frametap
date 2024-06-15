@@ -115,15 +115,19 @@ const SharedContext = struct {
     /// A thread must hold this mutext to acess anything else in the struct
     mutex: Thread.Mutex = .{},
     /// Will be posted to when the producer is finished.
-    all_frames_produced: Thread.Mutex = .{},
+    all_frames_produced: Thread.Semaphore = .{},
     /// The producer will post to this when a new frame is ready for processing.
     new_frame_ready: Thread.Semaphore = .{},
 };
 
 const Capturer = FrameTap(*SharedContext);
 
-fn startCapture(capturer: *Capturer) !void {
+fn startCapture(ctx: *SharedContext, capturer: *Capturer) !void {
     try capturer.capture.begin(); // this will block forever.
+    ctx.mutex.lock();
+    ctx.all_frames_produced.post();
+    ctx.new_frame_ready.post();
+    ctx.mutex.unlock();
 }
 
 fn produceFrame(ctx: *SharedContext, frame: core.Frame) !void {
@@ -148,34 +152,28 @@ fn consumer(
 
     defer gif.deinit();
 
-    // Allocate a buffer that can hold the color data
-    // for a frame when it arrives.
-    const framebuf: []u8 = try allocator.alloc(u8, width * height * 4);
-    defer allocator.free(framebuf);
-
     while (true) {
         ctx.new_frame_ready.wait();
-
-        const no_more_frames = ctx.all_frames_produced.tryLock();
-        if (no_more_frames) {
-            ctx.mutex.lock();
-            break;
+        if (ctx.all_frames_produced.timedWait(0)) break else |_| {
+            // If it errors out, then there is nothing to wait on.
+            // This means the producer hasn't called `post` on this semaphore,
+            // because it's not done producing frames yet.
         }
 
-        ctx.mutex.lock(); // lock mutex to access queue
+        ctx.mutex.lock(); // lock this mutex to access values in ctx.
         std.debug.assert(!ctx.unprocessed_frames.isEmpty());
         const frame = try ctx.unprocessed_frames.pop();
         const duration = frame.duration_ms;
-        @memcpy(framebuf, frame.image.data);
-        ctx.mutex.unlock(); // drop mutex after frame is copied.
+        ctx.mutex.unlock(); // unlock drop mutex after frame is copied.
 
         // add frame to GIF.
         try gif.addFrame(.{
-            .bgra_buf = framebuf,
+            .bgra_buf = frame.image.data,
             .duration_ms = @intFromFloat(duration),
         });
     }
 
+    ctx.mutex.lock();
     defer ctx.mutex.unlock();
 
     while (!ctx.unprocessed_frames.isEmpty()) {
@@ -216,8 +214,7 @@ pub fn main() !void {
     defer capturer.deinit();
     capturer.onFrame(produceFrame);
 
-    ctx.all_frames_produced.lock();
-    const producer_thread = try std.Thread.spawn(.{}, startCapture, .{capturer});
+    const producer_thread = try std.Thread.spawn(.{}, startCapture, .{ ctx, capturer });
     const consumer_thread = try std.Thread.spawn(.{}, consumer, .{
         ctx,
         args.gif_width,
@@ -233,11 +230,5 @@ pub fn main() !void {
 
     try capturer.capture.end();
     producer_thread.join();
-
-    ctx.all_frames_produced.unlock();
-    ctx.new_frame_ready.post();
-
     consumer_thread.join();
-
-    std.debug.print("done :)\n", .{});
 }

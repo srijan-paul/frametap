@@ -76,3 +76,24 @@ test "Queue" {
     try queue.push(4);
     try t.expectEqual(4, try queue.pop());
 }
+
+test "Queue – growing the buffer" {
+    const allocator = t.allocator;
+    var queue = try Queue(i32).init(allocator);
+    defer queue.deinit();
+
+    const numbers = try allocator.alloc(i32, 10_000_000);
+    defer allocator.free(numbers);
+
+    for (0..numbers.len) |i| {
+        numbers[i] = @intCast(i);
+    }
+
+    for (numbers) |n| {
+        try queue.push(n);
+    }
+
+    for (numbers) |n| {
+        try t.expectEqual(n, try queue.pop());
+    }
+}
