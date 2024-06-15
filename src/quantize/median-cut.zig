@@ -239,7 +239,7 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
         image_buf[i] = nearest_color.index_in_color_table;
     }
 
-    if (config.use_dithering and false) {
+    if (config.use_dithering) {
         var ditherer = try Dither.init(allocator, &all_colors, color_table);
         try ditherer.ditherBgraImage(
             image,
@@ -333,6 +333,8 @@ fn quantizeHistogram(
         const r: u8 = color.RGB[0] << shift;
         const g: u8 = color.RGB[1] << shift;
         const b: u8 = color.RGB[2] << shift;
+
+        if (color.index_in_color_table != 0) continue;
 
         const nearest = kdtree.findNearestColor([3]u8{ r, g, b }).color_table_index;
         color.index_in_color_table = nearest;

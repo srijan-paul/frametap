@@ -42,19 +42,19 @@ const CliConfig = struct {
     gif_height: usize,
 
     duration_seconds: f64,
-    out_path: []const u8,
+    out_path: [:0]const u8,
 
     pub fn deinit(self: *const CliConfig) void {
         self.allocator.free(self.out_path);
     }
 };
 
-pub fn parseArguments(allocator: std.mem.Allocator) !CliConfig {
+pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help                Display this help and exit.
         \\-r, --resolution <str>    <width>x<height> Set the dimensions of the image.
         \\-d, --duration   <f64>    Set the duration of the GIF (in seconds).
-        \\-o, --output     <str>    Set the output file (default – out.gif).
+        \\-o, --output     <str>    Set the output filepath (default: out.gif).
     );
 
     var diag = clap.Diagnostic{};
@@ -69,6 +69,11 @@ pub fn parseArguments(allocator: std.mem.Allocator) !CliConfig {
     };
     defer res.deinit();
 
+    if (res.args.help != 0) {
+        try clap.help(std.io.getStdErr().writer(), clap.Help, &params, .{});
+        return null;
+    }
+
     const resolution = if (res.args.resolution) |res_str|
         try parseResolution(res_str)
     else {
@@ -82,7 +87,7 @@ pub fn parseArguments(allocator: std.mem.Allocator) !CliConfig {
     };
 
     const output = res.args.output orelse "out.gif";
-    const output_owned = try allocator.dupe(u8, output);
+    const output_owned = try allocator.dupeZ(u8, output);
 
     return CliConfig{
         .allocator = allocator,
@@ -95,12 +100,148 @@ pub fn parseArguments(allocator: std.mem.Allocator) !CliConfig {
     };
 }
 
+const core = @import("frametap");
+const FrameTap = core.FrameTap;
+const zgif = @import("zgif");
+const Queue = @import("util/queue.zig").Queue;
+
+const Thread = std.Thread;
+
+/// Data shared between the thread that produces frames,
+/// and the one that consumes them.
+const SharedContext = struct {
+    /// A Queue of frames. Producer pushes, consumer pops.
+    unprocessed_frames: *Queue(core.Frame),
+    /// A thread must hold this mutext to acess anything else in the struct
+    mutex: Thread.Mutex = .{},
+    /// Will be posted to when the producer is finished.
+    all_frames_produced: Thread.Mutex = .{},
+    /// The producer will post to this when a new frame is ready for processing.
+    new_frame_ready: Thread.Semaphore = .{},
+};
+
+const Capturer = FrameTap(*SharedContext);
+
+fn startCapture(capturer: *Capturer) !void {
+    try capturer.capture.begin(); // this will block forever.
+}
+
+fn produceFrame(ctx: *SharedContext, frame: core.Frame) !void {
+    ctx.mutex.lock();
+    try ctx.unprocessed_frames.push(frame);
+    ctx.mutex.unlock();
+    ctx.new_frame_ready.post();
+}
+
+fn consumer(
+    ctx: *SharedContext,
+    gif: *zgif.Gif,
+    width: usize, // width of a frame.
+    height: usize, // height of a frame.
+) !void {
+    // Allocate a buffer that can hold the color data
+    // for a frame when it arrives.
+    const allocator = std.heap.page_allocator;
+    const framebuf: []u8 = try allocator.alloc(u8, width * height * 4);
+    defer allocator.free(framebuf);
+
+    while (true) {
+        ctx.new_frame_ready.wait();
+
+        const no_more_frames = ctx.all_frames_produced.tryLock();
+        if (no_more_frames) {
+            ctx.mutex.lock();
+            break;
+        }
+
+        ctx.mutex.lock(); // lock mutex to access queue
+        std.debug.assert(!ctx.unprocessed_frames.isEmpty());
+        const frame = try ctx.unprocessed_frames.pop();
+        const duration = frame.duration_ms;
+        @memcpy(framebuf, frame.image.data);
+        ctx.mutex.unlock(); // drop mutex after frame is copied.
+
+        // add frame to GIF.
+        try gif.addFrame(.{
+            .bgra_buf = framebuf,
+            .duration_ms = @intFromFloat(duration),
+        });
+    }
+
+    defer ctx.mutex.unlock();
+
+    while (!ctx.unprocessed_frames.isEmpty()) {
+        const frame = try ctx.unprocessed_frames.pop();
+        try gif.addFrame(.{
+            .bgra_buf = frame.image.data,
+            .duration_ms = @intFromFloat(frame.duration_ms),
+        });
+    }
+
+    try gif.close();
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    const args = try parseArguments(allocator);
+    const args = (try parseArguments(allocator)) orelse return;
     defer args.deinit();
 
-    std.debug.print("args: {s}\n", .{args.out_path});
+    const frame_queue = try allocator.create(Queue(core.Frame));
+    frame_queue.* = try Queue(core.Frame).init(allocator);
+    defer {
+        frame_queue.deinit();
+        allocator.destroy(frame_queue);
+    }
+
+    const ctx = try allocator.create(SharedContext);
+    ctx.* = SharedContext{ .unprocessed_frames = frame_queue };
+    defer allocator.destroy(ctx);
+
+    const capturer = try Capturer.init(allocator, ctx, .{
+        .x = 0,
+        .y = 0,
+        .width = @floatFromInt(args.gif_width),
+        .height = @floatFromInt(args.gif_height),
+    });
+    defer capturer.deinit();
+    capturer.onFrame(produceFrame);
+
+    const gif: *zgif.Gif = try allocator.create(zgif.Gif);
+    gif.* = try zgif.Gif.init(allocator, .{
+        .width = args.gif_width,
+        .height = args.gif_height,
+        .path = args.out_path,
+    });
+
+    defer {
+        gif.deinit();
+        allocator.destroy(gif);
+    }
+
+    ctx.all_frames_produced.lock();
+    const producer_thread = try std.Thread.spawn(.{}, startCapture, .{capturer});
+    const consumer_thread = try std.Thread.spawn(.{}, consumer, .{
+        ctx,
+        gif,
+        args.gif_width,
+        args.gif_height,
+    });
+
+    const sleep_ns: u64 = @intFromFloat(
+        args.duration_seconds * @as(f64, @floatFromInt(std.time.ns_per_s)),
+    );
+
+    std.time.sleep(sleep_ns);
+
+    try capturer.capture.end();
+    producer_thread.join();
+
+    ctx.all_frames_produced.unlock();
+    ctx.new_frame_ready.post();
+
+    consumer_thread.join();
+
+    std.debug.print("done :)\n", .{});
 }
