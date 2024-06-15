@@ -135,13 +135,21 @@ fn produceFrame(ctx: *SharedContext, frame: core.Frame) !void {
 
 fn consumer(
     ctx: *SharedContext,
-    gif: *zgif.Gif,
     width: usize, // width of a frame.
     height: usize, // height of a frame.
+    out_path: [:0]const u8, // path to write the gif to.
 ) !void {
+    const allocator = std.heap.page_allocator;
+    var gif = try zgif.Gif.init(allocator, .{
+        .width = width,
+        .height = height,
+        .path = out_path,
+    });
+
+    defer gif.deinit();
+
     // Allocate a buffer that can hold the color data
     // for a frame when it arrives.
-    const allocator = std.heap.page_allocator;
     const framebuf: []u8 = try allocator.alloc(u8, width * height * 4);
     defer allocator.free(framebuf);
 
@@ -208,25 +216,13 @@ pub fn main() !void {
     defer capturer.deinit();
     capturer.onFrame(produceFrame);
 
-    const gif: *zgif.Gif = try allocator.create(zgif.Gif);
-    gif.* = try zgif.Gif.init(allocator, .{
-        .width = args.gif_width,
-        .height = args.gif_height,
-        .path = args.out_path,
-    });
-
-    defer {
-        gif.deinit();
-        allocator.destroy(gif);
-    }
-
     ctx.all_frames_produced.lock();
     const producer_thread = try std.Thread.spawn(.{}, startCapture, .{capturer});
     const consumer_thread = try std.Thread.spawn(.{}, consumer, .{
         ctx,
-        gif,
         args.gif_width,
         args.gif_height,
+        args.out_path,
     });
 
     const sleep_ns: u64 = @intFromFloat(

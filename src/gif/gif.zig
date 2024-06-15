@@ -146,7 +146,7 @@ pub const Gif = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *const Self) void {
         self.allocator.destroy(self.cgif_config);
         self.allocator.destroy(self.cgif_frame_config);
     }
