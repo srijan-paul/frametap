@@ -77,12 +77,10 @@ pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
     const resolution = if (res.args.resolution) |res_str|
         try parseResolution(res_str)
     else {
-        _ = try io.getStdErr().write("Resolution is required (e.g -r 400x400)\n");
         return ArgError.no_resolution;
     };
 
     const duration = if (res.args.duration) |dur| dur else {
-        _ = try io.getStdErr().write("Duration is required (e.g -d 100)\n");
         return ArgError.no_duration;
     };
 
@@ -191,7 +189,24 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    const args = (try parseArguments(allocator)) orelse return;
+    const maybe_args = if (parseArguments(allocator)) |args| args else |err| {
+        switch (err) {
+            ArgError.bad_resolution => {
+                _ = try io.getStdErr().write("Invalid resolution. Use -r <width>x<height>\n");
+            },
+            ArgError.no_resolution => {
+                _ = try io.getStdErr().write("Resolution is required (e.g -r 400x400)\n");
+            },
+            ArgError.no_duration => {
+                _ = try io.getStdErr().write("Duration is required (e.g -d 100)\n");
+            },
+            else => |e| return e,
+        }
+
+        return err;
+    };
+
+    const args = maybe_args orelse return;
     defer args.deinit();
 
     const frame_queue = try allocator.create(Queue(core.Frame));
