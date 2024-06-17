@@ -305,11 +305,13 @@ fn quantizeHistogram(
         // 1. Find the average color of this partition.
         // 2. Point all colors in this partition to the index of this partition.
         var color = partition.colors;
-        var rgb_sum: @Vector(3, usize) = .{ 0, 0, 0 };
+        var rgb_sum: [3]usize = .{ 0, 0, 0 };
         for (0..partition.num_colors) |j| {
             color.index_in_color_table = @truncate(i);
 
-            rgb_sum += color.RGB;
+            rgb_sum[0] += color.RGB[0];
+            rgb_sum[1] += color.RGB[1];
+            rgb_sum[2] += color.RGB[2];
 
             if (color.next) |next| {
                 color = next;
@@ -350,10 +352,10 @@ fn findWidestChannel(partition: *ColorSpace) void {
     var color: ?*QuantizedColor = partition.colors;
     for (0..partition.num_colors) |_| {
         std.debug.assert(color != null);
-        const color_ptr = color orelse unreachable;
+        const color_ptr = if (color) |c| c else unreachable;
         for (0..3) |i| {
-            min[i] = @min(color_ptr.RGB[i] << shift, min[i]);
-            max[i] = @max(color_ptr.RGB[i] << shift, max[i]);
+            min[i] = @min(color_ptr.RGB[i] << 3, min[i]);
+            max[i] = @max(color_ptr.RGB[i] << 3, max[i]);
         }
         color = color_ptr.next;
     }
@@ -455,125 +457,6 @@ fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
     return split_index;
 }
 
-fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) !*ColorSpace {
-    std.debug.assert(partition.num_colors > 1);
-
-    const half_population: usize = partition.num_pixels / 2;
-
-    // Color that divides the population of pixels in this partition
-    // into two (roughly) equal halves.
-    var median_color: *QuantizedColor = partition.colors;
-    var cumulative_population: usize = 1; // # colors on the left side
-    var npixels_left = median_color.frequency; // # pixels on the left side
-
-    const widest_channel = @intFromEnum(partition.widest_channel);
-
-    // min, max, and widest color (in the widest channel) on the left side of the median.
-    var min_color_left = median_color.RGB[widest_channel] << shift;
-    var max_color_left = median_color.RGB[widest_channel] << shift;
-    var color_width_left: i32 = 0;
-
-    while (true) {
-        // check if we've reached the color that divides the population in half.
-        const reached_half_population =
-            npixels_left >= half_population or
-            median_color.next == null or
-            median_color.next.?.next == null;
-
-        if (reached_half_population) {
-            // Now, `median_color` points to the color
-            // that divides the population in this partition into two
-            // roughly equal halves.
-            //
-            // We want to take the longer side (left), find its midpoint
-            // and use that to split the old partition into two new ones.
-            // Instead of allocating two new partitions, we'll reuse the old one.
-            // and allocate just one new partition for the new left side.
-
-            var new_partition = try allocator.create(ColorSpace);
-            const midpoint = min_color_left + @divTrunc(color_width_left, 2);
-
-            // At the end of the iteration, `temp_color` will
-            // point to the first color in the old partition.
-            var temp_color: *QuantizedColor = partition.colors;
-
-            var new_rgbmin: @Vector(3, i32) = temp_color.RGB;
-            var new_rgbmax: @Vector(3, i32) = temp_color.RGB;
-
-            const shift_vec: @Vector(3, i32) = [_]i32{shift} ** 3;
-            new_rgbmin <<= shift_vec;
-            new_rgbmax <<= shift_vec;
-
-            var new_num_pixels: usize = temp_color.frequency;
-            var new_num_colors: usize = 1;
-            while (true) {
-                const prev = temp_color;
-                temp_color = temp_color.next orelse @panic("bug encountered. please report.");
-                if ((temp_color.RGB[widest_channel] << shift) >= midpoint) {
-                    // unlink the colors in two partitions.
-                    prev.next = null;
-                    break;
-                }
-
-                var rgb: @Vector(3, i32) = temp_color.RGB;
-                rgb <<= shift_vec;
-                new_rgbmin = @min(new_rgbmin, rgb);
-                new_rgbmax = @max(new_rgbmax, rgb);
-
-                new_num_colors += 1;
-                new_num_pixels += temp_color.frequency;
-            }
-
-            new_partition.colors = partition.colors;
-            new_partition.num_colors = new_num_colors;
-            new_partition.num_pixels = new_num_pixels;
-            new_partition.rgb_min = new_rgbmin;
-            new_partition.rgb_max = new_rgbmax;
-
-            // set the new partition's widest channel.
-            var new_rgbwidth = [3]i32{ 0, 0, 0 };
-            var maxdiff: i32 = 0;
-            for (0..3) |i| {
-                new_rgbwidth[i] = new_rgbmax[i] - new_rgbmin[i];
-                if (new_rgbwidth[i] >= maxdiff) {
-                    maxdiff = new_rgbwidth[i];
-                    new_partition.widest_channel = @enumFromInt(i);
-                }
-            }
-
-            new_partition.rgb_width = maxdiff;
-
-            partition.colors = temp_color;
-            partition.num_colors = partition.num_colors - new_num_colors;
-            partition.num_pixels = partition.num_pixels - new_num_pixels;
-            findWidestChannel(partition);
-
-            return new_partition;
-        }
-
-        const next = median_color.next orelse unreachable;
-
-        median_color = next;
-        npixels_left += median_color.frequency;
-        cumulative_population += 1;
-
-        // compare the value of this color in the widest
-        // axis to the min and max values found so far.
-        const color_value = median_color.RGB[widest_channel] << shift;
-        if (color_value < min_color_left) {
-            min_color_left = color_value;
-            color_width_left = max_color_left - min_color_left;
-        } else if (color_value > max_color_left) {
-            max_color_left = color_value;
-            color_width_left = max_color_left - min_color_left;
-        }
-    }
-}
-
-test "splitPartition" {
-    // TODO
-}
-
 /// Recursively split the colorspace into smaller partitions until 2^depth partitions are created.
 fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: u4) ![]*ColorSpace {
     const total_partitions = std.math.pow(usize, 2, depth);
@@ -585,18 +468,68 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
     while (n_partitions < total_partitions) : (n_partitions += 1) {
         // Look for the partition that has the largest variance in RGB width.
         const split_index_ = findPartitionToSplit(parts[0..n_partitions]);
-        const split_index = split_index_ orelse break;
+        const split_index = if (split_index_) |index| index else break;
 
         // We found the partition that varies the most in either of the 3 color channels.
         const partition_to_split = parts[split_index];
         // sort the colors in that partition along the widest channel.
         const sorted_colors = try sortPartition(allocator, partition_to_split);
         defer allocator.free(sorted_colors);
-
         // Now the colors in the partition are sorted along the widest channel.
-        partition_to_split.colors = sorted_colors[0]; // reset the head pointer of the linked list.
+        partition_to_split.colors = sorted_colors[0];
+        // Create a new partition. We will populate this struct below.
+        const new_partition = try allocator.create(ColorSpace);
 
-        const new_partition = try splitPartitionImproved(allocator, partition_to_split);
+        // Next, we find the *median* color in the sorted list of colors.
+        // NOTE: The median is NOT the middle element, since we're not sorting by frequency.
+        // We want the color that divides the partitions such that both halves
+        // contribute roughly the same pixel-frequency.
+        // AKA sum([color.frequency for color in left]) =  sum(color.frequency for color in right).
+        var color = partition_to_split.colors;
+
+        // # of pixels that should remain in the current partition (left half).
+        // The first color in the current partition will remain in it.
+        const target_pixel_count = partition_to_split.num_pixels / 2;
+        var remaining_pixel_count: usize = color.frequency; // # of pixels that will remain in the current partition.
+        var remaining_color_count: usize = 1; // # of colors that will remain in the current partition.
+
+        // At the end of this loop, `color` will point to the last color that will remain
+        // in the current partition, and `color.next` will be the first color in the new partition.
+        while (true) {
+            // Stop if we are on the second last item in the linked list.
+            const next_color = if (color.next) |c| c else break;
+            if (next_color.next == null) {
+                break;
+            }
+
+            color = next_color;
+            remaining_color_count += 1;
+            remaining_pixel_count += next_color.frequency;
+
+            // We've reached the target pixel freuqency for the left half (remaining parition).
+            if (remaining_pixel_count >= target_pixel_count) break;
+        }
+
+        // At this point, `color` is the last color in the left partition.
+        const last_of_left = color;
+        const first_of_right = if (last_of_left.next) |c| c else unreachable;
+
+        // Set up the new partition (right half).
+        new_partition.colors = first_of_right;
+        last_of_left.next = null; // unlink the two partitions.
+
+        new_partition.num_pixels = partition_to_split.num_pixels - remaining_pixel_count;
+        new_partition.num_colors = partition_to_split.num_colors - remaining_color_count;
+
+        partition_to_split.num_colors = remaining_color_count;
+        partition_to_split.num_pixels = remaining_pixel_count;
+
+        // Update the bounding boxes of the two partitions.
+        // TODO: can I optimize this somehow? GIFLIB seems to use some kind of a trick here.
+        findWidestChannel(partition_to_split);
+        findWidestChannel(new_partition);
+
+        // Add the new partition to the partitions array.
         parts[n_partitions] = new_partition;
 
         std.debug.assert(partition_to_split.num_pixels == countPixels(partition_to_split));

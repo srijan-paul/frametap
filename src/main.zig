@@ -4,12 +4,12 @@ const clap = @import("clap");
 const io = std.io;
 
 const ArgError = error{
-    bad_resolution,
+    bad_coordinate,
     no_resolution,
     no_duration,
 };
 
-pub fn parseResolution(resolution_str: []const u8) ![2]usize {
+pub fn parseCoordinate(resolution_str: []const u8) ![2]usize {
     var index_of_x: ?usize = null;
     for (0.., resolution_str) |i, char| {
         if (char == 'x') {
@@ -19,15 +19,15 @@ pub fn parseResolution(resolution_str: []const u8) ![2]usize {
     }
 
     const x_index = index_of_x orelse
-        return ArgError.bad_resolution;
+        return ArgError.bad_coordinate;
 
     const width_str = resolution_str[0..x_index];
     const height_str = resolution_str[x_index + 1 ..];
 
     const width = std.fmt.parseInt(usize, width_str, 10) catch
-        return ArgError.bad_resolution;
+        return ArgError.bad_coordinate;
     const height = std.fmt.parseInt(usize, height_str, 10) catch
-        return ArgError.bad_resolution;
+        return ArgError.bad_coordinate;
 
     return .{ width, height };
 }
@@ -55,6 +55,7 @@ pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
         \\-r, --resolution <str>    <width>x<height> Set the dimensions of the image.
         \\-d, --duration   <f64>    Set the duration of the GIF (in seconds).
         \\-o, --output     <str>    Set the output filepath (default: out.gif).
+        \\-c, --coord      <str>    <x>x<y> Set the top-left coordinates of the capture area (default: 0,0).
     );
 
     var diag = clap.Diagnostic{};
@@ -75,10 +76,15 @@ pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
     }
 
     const resolution = if (res.args.resolution) |res_str|
-        try parseResolution(res_str)
+        try parseCoordinate(res_str)
     else {
         return ArgError.no_resolution;
     };
+
+    const topleft = if (res.args.coord) |coord|
+        try parseCoordinate(coord)
+    else
+        .{ 0, 0 };
 
     const duration = if (res.args.duration) |dur| dur else {
         return ArgError.no_duration;
@@ -89,8 +95,8 @@ pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
 
     return CliConfig{
         .allocator = allocator,
-        .x = 0,
-        .y = 0,
+        .x = topleft[0],
+        .y = topleft[1],
         .gif_width = resolution[0],
         .gif_height = resolution[1],
         .duration_seconds = duration,
@@ -146,6 +152,7 @@ fn consumer(
         .width = width,
         .height = height,
         .path = out_path,
+        .use_dithering = true,
     });
 
     defer gif.deinit();
@@ -191,8 +198,8 @@ pub fn main() !void {
 
     const maybe_args = if (parseArguments(allocator)) |args| args else |err| {
         switch (err) {
-            ArgError.bad_resolution => {
-                _ = try io.getStdErr().write("Invalid resolution. Use -r <width>x<height>\n");
+            ArgError.bad_coordinate => {
+                _ = try io.getStdErr().write("Invalid coordinate. Use <width>x<height>\n");
             },
             ArgError.no_resolution => {
                 _ = try io.getStdErr().write("Resolution is required (e.g -r 400x400)\n");
@@ -221,8 +228,8 @@ pub fn main() !void {
     defer allocator.destroy(ctx);
 
     const capturer = try Capturer.init(allocator, ctx, .{
-        .x = 0,
-        .y = 0,
+        .x = @floatFromInt(args.x),
+        .y = @floatFromInt(args.y),
         .width = @floatFromInt(args.gif_width),
         .height = @floatFromInt(args.gif_height),
     });
