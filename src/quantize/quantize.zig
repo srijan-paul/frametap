@@ -6,6 +6,7 @@ pub const QuantizerConfig = struct {
     height: usize,
     use_dithering: bool,
     allocator: std.mem.Allocator,
+    ncolors: u16 = 256,
 };
 
 /// A single RGB image represented as a list of indices
@@ -103,4 +104,24 @@ pub fn quantizeBgraImage(
         },
         else => std.debug.panic("not implemented!", .{}),
     }
+}
+
+/// Reduce the number of colors in an image down to a specific number.
+pub fn reduceColors(
+    allocator: std.mem.Allocator,
+    bgra_buf: []const u8,
+    width: usize,
+    height: usize,
+    colors: u16,
+    dither: bool,
+) !QuantizedImage {
+    const config = QuantizerConfig{
+        .width = width,
+        .height = height,
+        .use_dithering = dither,
+        .allocator = allocator,
+        .ncolors = colors,
+    };
+
+    return try median_cut.quantizeBgraImage(config, bgra_buf);
 }

@@ -14,6 +14,11 @@ fn addCGif(compile: *Step.Compile) void {
     compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
 }
 
+fn addImgLib(compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.LazyPath.relative("stb"));
+    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("stb/load_image.c") });
+}
+
 fn addPngLib(compile: *Step.Compile) void {
     compile.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
     compile.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
@@ -47,6 +52,7 @@ pub fn build(b: *std.Build) void {
 
     const timerModule = b.addModule("timer", .{ .root_source_file = .{ .path = "src/timer.zig" } });
 
+    // quantization library
     const quantizeLib = b.addStaticLibrary(.{
         .name = "quantize",
         .root_source_file = .{ .path = "src/quantize/quantize.zig" },
@@ -54,9 +60,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     addImport(quantizeLib, "timer", timerModule);
-
     const quantizeModule = &quantizeLib.root_module;
 
+    // zgif library
     const zgifLibrary = b.addStaticLibrary(.{
         .name = "zgif",
         .root_source_file = .{ .path = "src/gif/gif.zig" },
@@ -65,7 +71,6 @@ pub fn build(b: *std.Build) void {
     });
     addCGif(zgifLibrary);
     addImport(zgifLibrary, "quantize", quantizeModule);
-
     const zgifModule = &zgifLibrary.root_module;
 
     const library = b.addStaticLibrary(.{
@@ -106,6 +111,22 @@ pub fn build(b: *std.Build) void {
 
         const run_step = b.step("run", "Run the executable");
         run_step.dependOn(&run_exe.step);
+    }
+
+    {
+        const reduce_colors_exe = b.addExecutable(.{
+            .name = "reduce-colors",
+            .root_source_file = .{ .path = "src/tools/reduce-colors.zig" },
+            .target = target,
+            .optimize = std.builtin.OptimizeMode.ReleaseFast,
+        });
+
+        const clap = b.dependency("clap", .{});
+        reduce_colors_exe.root_module.addImport("clap", clap.module("clap"));
+
+        addImgLib(reduce_colors_exe); // add stb for parsing PNG, etc.
+        addImport(reduce_colors_exe, "quantize", quantizeModule);
+        b.installArtifact(reduce_colors_exe);
     }
 
     {

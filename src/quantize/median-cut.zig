@@ -226,7 +226,12 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
     }
 
     const allocator = config.allocator;
-    const color_table = try quantizeHistogram(allocator, &all_colors, n_pixels);
+    const color_table = try quantizeHistogram(
+        allocator,
+        &all_colors,
+        n_pixels,
+        config.ncolors,
+    );
 
     // Now go over the input image, and replace each pixel with the index of the partition
     var image_buf = try allocator.alloc(u8, n_pixels);
@@ -258,6 +263,7 @@ fn quantizeHistogram(
     allocator: std.mem.Allocator,
     all_colors: *[color_array_size]QuantizedColor,
     n_pixels: usize,
+    n_colors: u16,
 ) ![]u8 {
     // Find all colors in the color table that are used at least once, and chain them.
     var head: *QuantizedColor = undefined;
@@ -288,7 +294,7 @@ fn quantizeHistogram(
 
     findWidestChannel(first_partition);
 
-    const partitions = try medianCut(allocator, first_partition, 8);
+    const partitions = try medianCut(allocator, first_partition, n_colors);
 
     defer {
         for (partitions) |p| {
@@ -455,6 +461,73 @@ fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
     return split_index;
 }
 
+fn splitPartition(allocator: std.mem.Allocator, partition: *ColorSpace) !*ColorSpace {
+    std.debug.assert(partition.num_colors > 1);
+
+    const half_population: usize = partition.num_pixels / 2;
+
+    // Color that divides the population of pixels in this partition
+    // into two (roughly) equal halves.
+    var median_color: *QuantizedColor = partition.colors;
+    var ncolors_left: usize = 1; // # colors on the left side
+    var npixels_left = median_color.frequency; // # pixels on the left side
+
+    // min, max, and widest color (in the widest channel) on the left side of the median.
+    var min_rgb_left: @Vector(3, i32) = .{ 255, 255, 255 };
+    var max_rgb_left: @Vector(3, i32) = .{ 0, 0, 0 };
+
+    const shift_vec: @Vector(3, i32) = .{ shift, shift, shift };
+    while (true) {
+        const next = median_color.next orelse break;
+        const reached_half_population =
+            npixels_left >= half_population or
+            next.next == null;
+
+        // check if we've reached the color that divides the population in half.
+        if (reached_half_population) {
+            break;
+        }
+
+        const rgb = @as(@Vector(3, i32), median_color.RGB) << shift_vec;
+        min_rgb_left = @min(min_rgb_left, rgb);
+        max_rgb_left = @max(max_rgb_left, rgb);
+
+        median_color = next;
+        npixels_left += median_color.frequency;
+        ncolors_left += 1;
+    }
+
+    const new_partition = try allocator.create(ColorSpace);
+    new_partition.colors = partition.colors;
+    new_partition.num_colors = ncolors_left;
+    new_partition.num_pixels = npixels_left;
+    new_partition.rgb_min = min_rgb_left;
+    new_partition.rgb_max = max_rgb_left;
+
+    // set the new partition's widest channel.
+    var widest_channel = Channel.Red;
+    var maxdiff: i32 = 0;
+    for (0..3) |i| {
+        const diff = max_rgb_left[i] - min_rgb_left[i];
+        if (diff >= maxdiff) {
+            maxdiff = diff;
+            widest_channel = @enumFromInt(i);
+        }
+    }
+
+    new_partition.widest_channel = widest_channel;
+
+    const first_of_right_partition = median_color.next orelse
+        @panic("encountered a bug, please report!");
+    median_color.next = null; // unlink the two partitions.
+    partition.colors = first_of_right_partition;
+    partition.num_colors = partition.num_colors - ncolors_left;
+    partition.num_pixels = partition.num_pixels - npixels_left;
+    findWidestChannel(partition);
+
+    return new_partition;
+}
+
 fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) !*ColorSpace {
     std.debug.assert(partition.num_colors > 1);
 
@@ -463,7 +536,6 @@ fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) 
     // Color that divides the population of pixels in this partition
     // into two (roughly) equal halves.
     var median_color: *QuantizedColor = partition.colors;
-    var cumulative_population: usize = 1; // # colors on the left side
     var npixels_left = median_color.frequency; // # pixels on the left side
 
     const widest_channel = @intFromEnum(partition.widest_channel);
@@ -555,7 +627,6 @@ fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) 
 
         median_color = next;
         npixels_left += median_color.frequency;
-        cumulative_population += 1;
 
         // compare the value of this color in the widest
         // axis to the min and max values found so far.
@@ -574,10 +645,8 @@ test "splitPartition" {
     // TODO
 }
 
-/// Recursively split the colorspace into smaller partitions until 2^depth partitions are created.
-fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: u4) ![]*ColorSpace {
-    const total_partitions = std.math.pow(usize, 2, depth);
-
+/// Recursively split the colorspace into smaller partitions until `total_partitions` partitions are created.
+fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, total_partitions: u16) ![]*ColorSpace {
     var parts = try allocator.alloc(*ColorSpace, total_partitions);
     parts[0] = first_partition;
 
@@ -586,6 +655,10 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, depth: 
         // Look for the partition that has the largest variance in RGB width.
         const split_index_ = findPartitionToSplit(parts[0..n_partitions]);
         const split_index = split_index_ orelse break;
+        // std.debug.print("split_index: {d} {d}\n", .{
+        //     split_index,
+        //     parts[split_index].num_colors,
+        // });
 
         // We found the partition that varies the most in either of the 3 color channels.
         const partition_to_split = parts[split_index];
