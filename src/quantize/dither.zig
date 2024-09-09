@@ -104,7 +104,9 @@ pub fn ditherBgraImage(
                 const next_row_ = @as(i64, @intCast(row)) + offset[0];
                 const next_col_ = @as(i64, @intCast(col)) + offset[1];
 
-                if (next_row_ < 0 or next_row_ >= height or next_col_ < 0 or next_col_ >= width) {
+                if (next_row_ < 0 or next_row_ >= height or
+                    next_col_ < 0 or next_col_ >= width)
+                {
                     continue;
                 }
 

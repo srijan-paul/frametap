@@ -51,7 +51,7 @@ const CliConfig = struct {
 
 pub fn parseArguments(allocator: std.mem.Allocator) !?CliConfig {
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help                Display this help and exit.
+        \\-h, --help                Display this message and exit.
         \\-r, --resolution <str>    <width>x<height> Set the dimensions of the image.
         \\-d, --duration   <f64>    Set the duration of the GIF (in seconds).
         \\-o, --output     <str>    Set the output filepath (default: out.gif).
@@ -205,7 +205,7 @@ pub fn main() !void {
                 _ = try io.getStdErr().write("Resolution is required (e.g -r 400x400)\n");
             },
             ArgError.no_duration => {
-                _ = try io.getStdErr().write("Duration is required (e.g -d 100)\n");
+                _ = try io.getStdErr().write("Duration is required (e.g -d 10)\n");
             },
             else => |e| return e,
         }

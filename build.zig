@@ -3,25 +3,25 @@ const builtin = @import("builtin");
 
 const Step = std.Build.Step;
 
-fn addCaptureLib(compile: *Step.Compile) void {
-    compile.addIncludePath(std.Build.LazyPath.relative("native"));
-    compile.addObjectFile(std.Build.LazyPath.relative("native/screencap.o"));
+fn addCaptureLib(b: *std.Build, compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.path(b, "native"));
+    compile.addObjectFile(std.Build.path(b, "native/screencap.o"));
 }
 
-fn addCGif(compile: *Step.Compile) void {
-    compile.addIncludePath(std.Build.LazyPath.relative("vendor/cgif/inc"));
-    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif.c") });
-    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("vendor/cgif/src/cgif_raw.c") });
+fn addCGif(b: *std.Build, compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.path(b, "vendor/cgif/inc"));
+    compile.addCSourceFile(.{ .file = std.Build.path(b, "vendor/cgif/src/cgif.c") });
+    compile.addCSourceFile(.{ .file = std.Build.path(b, "vendor/cgif/src/cgif_raw.c") });
 }
 
-fn addImgLib(compile: *Step.Compile) void {
-    compile.addIncludePath(std.Build.LazyPath.relative("stb"));
-    compile.addCSourceFile(.{ .file = std.Build.LazyPath.relative("stb/load_image.c") });
+fn addImgLib(b: *std.Build, compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.path(b, "stb"));
+    compile.addCSourceFile(.{ .file = std.Build.path(b, "stb/load_image.c") });
 }
 
-fn addPngLib(compile: *Step.Compile) void {
-    compile.addIncludePath(std.Build.LazyPath.relative("vendor/lodepng"));
-    compile.addObjectFile(std.Build.LazyPath.relative("vendor/lodepng/lodepng.o"));
+fn addPngLib(b: *std.Build, compile: *Step.Compile) void {
+    compile.addIncludePath(std.Build.path(b, "vendor/lodepng"));
+    compile.addObjectFile(std.Build.path(b, "vendor/lodepng/lodepng.o"));
 }
 
 fn addMacosDeps(b: *std.Build, compile: *Step.Compile) void {
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    addCGif(zgifLibrary);
+    addCGif(b, zgifLibrary);
     addImport(zgifLibrary, "quantize", quantizeModule);
     const zgifModule = &zgifLibrary.root_module;
 
@@ -83,8 +83,8 @@ pub fn build(b: *std.Build) void {
     });
 
     addImport(library, "zgif", zgifModule);
-    addCaptureLib(library);
-    addPngLib(library);
+    addCaptureLib(b, library);
+    addPngLib(b, library);
     b.installArtifact(library);
 
     {
@@ -124,7 +124,7 @@ pub fn build(b: *std.Build) void {
         const clap = b.dependency("clap", .{});
         reduce_colors_exe.root_module.addImport("clap", clap.module("clap"));
 
-        addImgLib(reduce_colors_exe); // add stb for parsing PNG, etc.
+        addImgLib(b, reduce_colors_exe); // add stb for parsing PNG, etc.
         addImport(reduce_colors_exe, "quantize", quantizeModule);
         b.installArtifact(reduce_colors_exe);
     }

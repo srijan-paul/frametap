@@ -5,7 +5,7 @@ const macos = @import("./mac-os.zig");
 const png = @import("./png.zig");
 const builtin = @import("builtin");
 
-// The mental model of the capture system is as follows:
+// The mental model of the capture system:
 //
 //     +----------+
 // +-->| Frametap | <-----+
@@ -149,7 +149,6 @@ pub const ICapturer = struct {
     pub fn destroy(self: *Self) void {
         if (builtin.os.tag == .macos) {
             const macos_capture: *macos.MacOSScreenCapture = @fieldParentPtr(
-                macos.MacOSScreenCapture,
                 "capture",
                 self,
             );
@@ -158,22 +157,22 @@ pub const ICapturer = struct {
             return;
         }
 
-        unreachable;
+        @panic("OS not supported");
     }
 
     /// Capture a screenshot of the screen.
     /// If `rect` is `null`, the rect area specified while initializing the capture object will be used.
     /// If that is `null` too, the entire screen will be captured.
     pub fn screenshot(self: *Self, rect: ?Rect) !ImageData {
-        // verify alginment.
-        std.debug.assert((@intFromPtr(self) % @alignOf(Self)) == 0);
         return self.screenshotFn(self, rect);
     }
 
+    /// Start screen recording
     pub fn begin(self: *Self) !void {
         try self.startRecordFn(self);
     }
 
+    /// End screen recording
     pub fn end(self: *Self) !void {
         try self.stopRecordFn(self);
     }

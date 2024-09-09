@@ -40,7 +40,9 @@ const ColorSpace = struct {
     /// The color channel in this partition with the highest range
     widest_channel: Channel,
     // width of the widest channel in this partition.
-    rgb_width: i32,
+    max_rgb_width: i32,
+    // length of the partition across each axis (R/G/B).
+    rgb_len: [3]i32,
     /// The minimum values of the respective RGB channels in this partition.
     rgb_min: [3]i32,
     /// The maximum values of the respective RGB channels in this partition.
@@ -51,6 +53,11 @@ const ColorSpace = struct {
     num_colors: usize,
     /// Number of pixels that this partition accounts for.
     num_pixels: usize,
+
+    /// Volume of the partition
+    pub inline fn volume(self: *Self) usize {
+        return @intCast(self.rgb_len[0] * self.rgb_len[1] * self.rgb_len[2]);
+    }
 };
 
 const Channel = enum(u5) { Red = 0, Blue = 1, Green = 2 };
@@ -197,7 +204,7 @@ pub fn quantizeBgraImage(config: QuantizerConfig, image: []const u8) !QuantizedI
     const n_pixels = image.len / 4;
     std.debug.assert(image.len % 4 == 0);
 
-    // Initialize the color array table with all possible colors in the R5G5B5 space.
+    // Initialize the global color array with all possible colors in the R5G5B5 space.
     var all_colors: [color_array_size]QuantizedColor = undefined;
     for (0.., &all_colors) |i, *color| {
         color.frequency = 0;
@@ -348,7 +355,7 @@ fn quantizeHistogram(
 }
 
 /// Find the color channel with the largest range in the given parition.
-/// Mutates `rgb_min`, `rgb_max`, `rgb_width`, and `widest_channel`.
+/// Mutates `rgb_min`, `rgb_max`, `rgb_len`, ` max_rgb_width`, and `widest_channel`.
 fn findWidestChannel(partition: *ColorSpace) void {
     var min = [3]i32{ 255, 255, 255 };
     var max = [3]i32{ 0, 0, 0 };
@@ -367,20 +374,22 @@ fn findWidestChannel(partition: *ColorSpace) void {
     partition.rgb_min = min;
     partition.rgb_max = max;
 
-    const rgb_ranges = [3]i32{ max[0] - min[0], max[1] - min[1], max[2] - min[2] };
-    if (rgb_ranges[0] > rgb_ranges[1] and rgb_ranges[0] > rgb_ranges[2]) {
+    const rgb_widths = [3]i32{ max[0] - min[0], max[1] - min[1], max[2] - min[2] };
+    partition.rgb_len = rgb_widths;
+
+    if (rgb_widths[0] > rgb_widths[1] and rgb_widths[0] > rgb_widths[2]) {
         partition.widest_channel = Channel.Red;
-        partition.rgb_width = max[0] - min[0];
+        partition.max_rgb_width = rgb_widths[0];
         return;
     }
 
-    if (rgb_ranges[1] > rgb_ranges[0] and rgb_ranges[1] > rgb_ranges[2]) {
-        partition.rgb_width = max[1] - min[1];
+    if (rgb_widths[1] > rgb_widths[0] and rgb_widths[1] > rgb_widths[2]) {
+        partition.max_rgb_width = rgb_widths[1];
         partition.widest_channel = Channel.Green;
         return;
     }
 
-    partition.rgb_width = max[2] - min[2];
+    partition.max_rgb_width = rgb_widths[2];
     partition.widest_channel = Channel.Blue;
 }
 
@@ -401,7 +410,8 @@ test "findWidestChannel" {
 
     var colorspace = ColorSpace{
         .widest_channel = undefined,
-        .rgb_width = undefined,
+        .max_rgb_width = undefined,
+        .rgb_len = undefined,
         .rgb_min = undefined,
         .rgb_max = undefined,
         .colors = &purple,
@@ -446,18 +456,26 @@ fn sortPartition(allocator: std.mem.Allocator, partition: *const ColorSpace) ![]
     return sorted_colors;
 }
 
-/// Given a list of partitions,
-/// find the partition that varies the most in RGB width, and return its index.
-fn findPartitionToSplit(partitions: []*ColorSpace) ?usize {
-    var max_size: i32 = 0;
+/// Find the index of the partition to split during median cut.
+fn findPartitionToSplit(partitions: []*ColorSpace, use_volume: bool) ?usize {
+    var max_val: usize = 0;
     var split_index: ?usize = null;
+
     for (0..partitions.len) |i| {
         const partition = partitions[i];
-        if (partition.rgb_width > max_size and partition.num_colors > 1) {
-            max_size = partition.rgb_width;
+        if (partition.num_colors <= 1) continue;
+
+        const val = if (use_volume)
+            partition.num_pixels * partition.volume()
+        else
+            partition.num_pixels;
+
+        if (val > max_val) {
+            max_val = val;
             split_index = i;
         }
     }
+
     return split_index;
 }
 
@@ -528,6 +546,8 @@ fn splitPartition(allocator: std.mem.Allocator, partition: *ColorSpace) !*ColorS
     return new_partition;
 }
 
+/// An "improved" partition split algorithm taken from this paper:
+/// http://leptonica.org/papers/mediancut.pdf
 fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) !*ColorSpace {
     std.debug.assert(partition.num_colors > 1);
 
@@ -543,6 +563,9 @@ fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) 
     // min, max, and widest color (in the widest channel) on the left side of the median.
     var min_color_left = median_color.RGB[widest_channel] << shift;
     var max_color_left = median_color.RGB[widest_channel] << shift;
+
+    // Width of the color channel on the left side of the color
+    // that divides the pixel population in half (a.k.a `median_color`).
     var color_width_left: i32 = 0;
 
     while (true) {
@@ -613,7 +636,8 @@ fn splitPartitionImproved(allocator: std.mem.Allocator, partition: *ColorSpace) 
                 }
             }
 
-            new_partition.rgb_width = maxdiff;
+            new_partition.rgb_len = new_rgbwidth;
+            new_partition.max_rgb_width = maxdiff;
 
             partition.colors = temp_color;
             partition.num_colors = partition.num_colors - new_num_colors;
@@ -652,13 +676,17 @@ fn medianCut(allocator: std.mem.Allocator, first_partition: *ColorSpace, total_p
 
     var n_partitions: usize = 1; // we're starting with 1 large partition.
     while (n_partitions < total_partitions) : (n_partitions += 1) {
-        // Look for the partition that has the largest variance in RGB width.
-        const split_index_ = findPartitionToSplit(parts[0..n_partitions]);
+
+        // For the 50% of the partitions,
+        // we divide them based on pixel population.
+        // We divide the other 50% based on the product of population
+        // and volume.
+        const split_index_ = findPartitionToSplit(
+            parts[0..n_partitions],
+            n_partitions >= total_partitions / 2,
+        );
+
         const split_index = split_index_ orelse break;
-        // std.debug.print("split_index: {d} {d}\n", .{
-        //     split_index,
-        //     parts[split_index].num_colors,
-        // });
 
         // We found the partition that varies the most in either of the 3 color channels.
         const partition_to_split = parts[split_index];

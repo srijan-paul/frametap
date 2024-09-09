@@ -23,7 +23,7 @@ pub const MacOSScreenCapture = struct {
 
     /// MacOS specific screenshot implementation.
     fn screenshot(ctx: *core.ICapturer, rect: ?Rect) !core.ImageData {
-        const self = @fieldParentPtr(Self, "capture", ctx);
+        const self: *Self = @fieldParentPtr("capture", ctx);
 
         var image: screencap.ImageData = undefined;
         if (rect) |r| {
@@ -66,7 +66,7 @@ pub const MacOSScreenCapture = struct {
         const capture: *Capturer = @ptrCast(@alignCast(capture_ptr));
 
         // From the cpature object, we can get a `self` pointer to this struct.
-        const self = @fieldParentPtr(Self, "capture", capture);
+        const self: *Self = @fieldParentPtr("capture", capture);
         const framebuf = self.allocator.alloc(u8, width * height * 4) catch return;
         @memcpy(framebuf, @as([*]u8, cframe.image.rgba_buf));
 
@@ -86,7 +86,7 @@ pub const MacOSScreenCapture = struct {
 
     /// MacOS specific screen capture function.
     fn startCaptureMacOS(ctx: *Capturer) !void {
-        const self = @fieldParentPtr(Self, "capture", ctx);
+        const self: *Self = @fieldParentPtr("capture", ctx);
         var frame_processor: screencap.FrameProcessor = undefined;
         frame_processor.other_data = &self.capture;
         frame_processor.process_fn = &Self.processCFrame;
@@ -97,7 +97,7 @@ pub const MacOSScreenCapture = struct {
 
     /// MacOS specific screen capture implementation
     fn stopCaptureMacOS(capturer: *Capturer) !void {
-        const self = @fieldParentPtr(Self, "capture", capturer);
+        const self: *Self = @fieldParentPtr("capture", capturer);
         // TODO: handle the return value
         _ = screencap.stop_capture(self.capture_c);
     }
