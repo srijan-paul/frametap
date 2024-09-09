@@ -19,11 +19,6 @@ fn addImgLib(b: *std.Build, compile: *Step.Compile) void {
     compile.addCSourceFile(.{ .file = std.Build.path(b, "stb/load_image.c") });
 }
 
-fn addPngLib(b: *std.Build, compile: *Step.Compile) void {
-    compile.addIncludePath(std.Build.path(b, "vendor/lodepng"));
-    compile.addObjectFile(std.Build.path(b, "vendor/lodepng/lodepng.o"));
-}
-
 fn addMacosDeps(b: *std.Build, compile: *Step.Compile) void {
     const objc = b.dependency("zig-objc", .{});
     compile.root_module.addImport("objc", objc.module("objc"));
@@ -84,7 +79,6 @@ pub fn build(b: *std.Build) void {
 
     addImport(library, "zgif", zgifModule);
     addCaptureLib(b, library);
-    addPngLib(b, library);
     b.installArtifact(library);
 
     {

@@ -32,8 +32,7 @@ const RgbImage = struct {
     }
 
     pub fn writeToFile(self: *const RgbImage, path: [:0]const u8) !void {
-        try std.fs.cwd().writeFile("out.rgb", self.rgb);
-
+        // try std.fs.cwd().writeFile("out.rgb", self.rgb);
         const ok = stb.write_image_to_png(path.ptr, self.rgb.ptr, self.width, self.height);
         if (!ok) {
             return ArgError.failed_to_write_image;
@@ -180,7 +179,6 @@ pub fn main() !void {
     defer image.deinit();
 
     try doQuantization(allocator, &image, config.ncolors, config.dither);
-
     try image.writeToFile("out.png");
     std.debug.print("Wrote image with dimensions: {}x{}\n", .{ image.width, image.height });
 }

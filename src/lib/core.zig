@@ -80,7 +80,7 @@ pub const ImageData = struct {
     /// An buffer containing the frame info as RGBARBGARGBA...
     /// `data.len = width * height * 4`.
     data: []u8,
-    /// Width of the frame pixels.
+    /// Width of the frame in pixels.
     width: usize,
     /// Height of the frame in pixels.
     height: usize,
